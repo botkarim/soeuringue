@@ -1,0 +1,864 @@
+/* Soeuringue — application (données stockées uniquement sur l'appareil) */
+(function () {
+  'use strict';
+  const E = window.Engine;
+  const KEY = 'soeuringue_v1';
+  const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+  const JOURS = ['D', 'L', 'M', 'M', 'J', 'V', 'S']; // getDay()
+  const JOURS_ORDRE = [1, 2, 3, 4, 5, 6, 0];
+  const JOURS_LONG = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
+
+  // ---------- état ----------
+  let S = load();
+  const UI = { month: E.iso(new Date()).slice(0, 7), draft: null, patientDate: E.iso(new Date()) };
+
+  function blank() {
+    return { v: 1, cabinets: [], patients: [], soins: [], virements: [],
+      tarifs: JSON.parse(JSON.stringify(E.DEFAULT_TARIFS)), regles: Object.assign({}, E.DEFAULT_REGLES),
+      apiKey: '', aiModel: 'claude-haiku-5-5' };
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (!raw) return blank();
+      const s = Object.assign(blank(), JSON.parse(raw));
+      s.tarifs = Object.assign(JSON.parse(JSON.stringify(E.DEFAULT_TARIFS)), s.tarifs || {});
+      s.regles = Object.assign({}, E.DEFAULT_REGLES, s.regles || {});
+      return s;
+    } catch (e) { return blank(); }
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast("Impossible d'enregistrer : mémoire pleine ?"); }
+  }
+  if (navigator.storage && navigator.storage.persist) { navigator.storage.persist().catch(() => {}); }
+
+  // ---------- utilitaires ----------
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
+  const eur = n => fmt.format(Math.round((n || 0) * 100) / 100);
+  const eur0 = n => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(Math.round(n || 0));
+  const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+  const today = () => E.iso(new Date());
+  const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const monthLabel = ym => { const [y, m] = ym.split('-'); return MOIS[+m - 1] + ' ' + y; };
+  const shiftMonth = (ym, n) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+  const dateFr = s => { const d = E.parseIso(s); return JOURS_LONG[d.getDay()] + ' ' + d.getDate() + ' ' + MOIS[d.getMonth()]; };
+  const dateCourt = s => s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4);
+  const cab = id => S.cabinets.find(c => c.id === id);
+  const pat = id => S.patients.find(p => p.id === id);
+
+  function toast(msg) {
+    const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2600);
+  }
+  function sheet(html, mount) {
+    const m = document.createElement('div'); m.className = 'modal';
+    m.innerHTML = '<div class="sheet" role="dialog" aria-modal="true">' + html + '</div>';
+    document.body.appendChild(m);
+    const close = () => m.remove();
+    m.addEventListener('click', e => { if (e.target === m) close(); });
+    $$('[data-close]', m).forEach(b => b.addEventListener('click', close));
+    if (mount) mount(m, close);
+    return close;
+  }
+  function confirmBox(msg, okLabel, cb) {
+    sheet('<h2>' + esc(msg) + '</h2><div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn danger" id="cf-ok">' + esc(okLabel) + '</button></div>',
+      (m, close) => $('#cf-ok', m).addEventListener('click', () => { close(); cb(); }));
+  }
+
+  // ---------- calculs ----------
+  function monthData(ym) {
+    const passages = E.coteMois(S, ym);
+    const byCab = {}, byPat = {};
+    S.cabinets.forEach(c => byCab[c.id] = { facture: 0, part: 0, recu: 0 });
+    passages.forEach(ps => {
+      const p = pat(ps.patientId); if (!p) return;
+      byPat[p.id] = (byPat[p.id] || 0) + ps.total;
+      if (byCab[p.cabinetId]) byCab[p.cabinetId].facture += ps.total;
+    });
+    S.virements.filter(v => v.mois === ym).forEach(v => { if (byCab[v.cabinetId]) byCab[v.cabinetId].recu += Number(v.montant) || 0; });
+    let tot = { facture: 0, part: 0, recu: 0 };
+    S.cabinets.forEach(c => {
+      const b = byCab[c.id]; b.part = b.facture * (1 - (Number(c.retro) || 0) / 100);
+      tot.facture += b.facture; tot.part += b.part; tot.recu += b.recu;
+    });
+    return { passages, byCab, byPat, tot };
+  }
+  function recText(s) {
+    const r = s.rec || { type: 'once' };
+    let t = r.type === 'once' ? 'Le ' + dateCourt(s.start)
+      : r.type === 'daily' ? 'Tous les jours'
+      : r.type === 'every2' ? 'Tous les 2 jours'
+      : 'Les ' + JOURS_ORDRE.filter(d => (r.days || []).includes(d)).map(d => JOURS_LONG[d]).join(' ');
+    if (r.type !== 'once') t += ' · depuis le ' + dateCourt(s.start) + (s.end ? ' jusqu’au ' + dateCourt(s.end) : '');
+    return t;
+  }
+  const actsText = acts => (acts || []).map(a => (a.qty > 1 ? a.qty + ' × ' : '') + E.actLabel(a)).join(' · ');
+
+  // ---------- reconnaissance locale ----------
+  const RULES = [
+    [/bilan.*plaie|\bami ?11\b/, 'bilan_plaie'],
+    [/bas de contention|\btension\b|constantes|temperature|saturation/, 'HORS'],
+    [/renouvel.*bsi|bsi.*renouvel|\bdi ?1[,.]2/, 'bsi_renouv'],
+    [/bilan.*bsi|bsi initial|\bdi ?2[,.]5/, 'bsi_initial'],
+    [/\bbs[abci]\b|dependan|toilette|nursing|hygiene|\bbsi\b/, 'dependance'],
+    [/\bvac\b|\btpn\b|pression negative/, 'tpn'],
+    [/compression|bandes? de contention sur|urgo ?k2|coban|biflex/, 'pans_compression'],
+    [/stomie|tracheo/, 'stomie'],
+    [/analges|emla/, 'analgesie'],
+    [/escarre|ulcere|mechage|meche|irrigation|lourd|complexe|brulure|amputation|fistule|perforant|greffe|osteosynthese|detersion|defibrin/, 'pans_lourd'],
+    [/agrafe|\bfils\b|points de suture/, 'FILS'],
+    [/pansement|\bpst\b|\bpans\b|plaie/, 'pans_simple'],
+    [/dextro|glycemi|\bhgt\b|\bglyc/, 'dextro'],
+    [/insuline|lantus|novorapid|humalog|toujeo|levemir|abasaglar|apidra|fiasp|tresiba/, 'insuline'],
+    [/prise de sang|\bpds\b|bilan sanguin|prelevement sanguin|\bnfs\b|\binr\b|plaquett|\bcrp\b|hemoculture|\bbs\b sang/, 'prise_sang'],
+    [/ecbu|urine|coproculture|prelevement/, 'prelev'],
+    [/vaccin/, 'vaccin'],
+    [/chimio/, 'chimio'],
+    [/astreinte|surveillance.*24 ?h/, 'perf_astreinte'],
+    [/(retrait|debranchement definitif|ablation).*(perf|ligne|diffuseur)/, 'perf_retrait'],
+    [/changement de (flacon|poche)|\bflacon\b|branchement en y|debranchement temporaire/, 'perf_chg'],
+    [/perf.*(longue|> ?1 ?h|plus d.?une heure|diffuseur|[2-9] ?h|1[0-9] ?h|24 ?h)/, 'perf_longue'],
+    [/heure (de perf )?(en )?plus|heure supplementaire|\bami ?6\b/, 'perf_heure'],
+    [/perf/, 'perf_courte'],
+    [/chambre implantable|\bpac\b/, 'inj_iv_pac'],
+    [/\bvvc\b|picc/, 'inj_iv_vvc'],
+    [/intraveineuse|\bivd?\b/, 'inj_iv'],
+    [/intradermique|\bid\b/, 'inj_id'],
+    [/implant|zoladex/, 'implant'],
+    [/injection|piqure|\bsc\b|sous[- ]?cut|\bim\b|intramusc|lovenox|innohep|fragmine|heparine|anticoag|arixtra/, 'inj_sc'],
+    [/aerosol|nebul/, 'aerosol'],
+    [/lavage vesical|vesirig/, 'lavage_vesical'],
+    [/(retrait|ablation|enlever).*sonde/, 'retrait_sonde'],
+    [/alimentation|enterale|gavage|nutri/, 'alim_enterale'],
+    [/lavement|fecalome|microlax|normacol/, 'lavement'],
+    [/pilulier|medicament|traitement oral|administration/, 'admin_medic'],
+    [/prado/, 'prado']
+  ];
+  const NUMS = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6 };
+  function parseLocal(text) {
+    const segs = norm(text).split(/\+|,|;|\n|\bet\b|\bpuis\b/).map(s => s.trim()).filter(Boolean);
+    const acts = [], unknown = [];
+    segs.forEach(seg => {
+      let id = null;
+      for (const [re, v] of RULES) if (re.test(seg)) { id = v; break; }
+      if (id === 'FILS') id = /plus de 10|> ?10|\b(1[1-9]|[2-9]\d)\b/.test(seg) ? 'ablation_fils_plus' : 'ablation_fils';
+      if (id === 'HORS') { unknown.push(seg + ' (hors NGAP : inclus dans le BSI ou non facturable)'); return; }
+      if (!id) { unknown.push(seg); return; }
+      let qty = 1;
+      const m = seg.match(/^(\d+)\s*(x|fois)?\b/) || seg.match(/\bx ?(\d+)\b/);
+      if (m) qty = Math.min(9, parseInt(m[1], 10)) || 1;
+      const w = seg.match(/^(un|une|deux|trois|quatre|cinq|six)\b/); if (w) qty = NUMS[w[1]];
+      const ex = acts.find(a => a.id === id && id !== 'pans_simple' && id !== 'insuline');
+      if (ex) ex.qty += qty; else acts.push({ id, qty });
+    });
+    return { acts, unknown };
+  }
+
+  // ---------- IA (texte des soins uniquement, jamais le nom du patient) ----------
+  async function parseAI(text) {
+    const list = Object.entries(E.ACTS).filter(([k]) => k !== 'manuel').map(([k, v]) => k + ' : ' + v.l).join('\n');
+    const system = "Tu convertis une description de soins infirmiers libéraux (dictée ou tapée, en français, parfois avec des abréviations) en actes d'un catalogue NGAP. " +
+      "Réponds UNIQUEMENT avec un objet JSON de la forme {\"actes\":[{\"id\":\"...\",\"qty\":1}],\"inconnus\":[\"...\"]}. " +
+      "N'utilise que les id du catalogue ci-dessous. qty = nombre d'actes identiques au même passage. Si un soin ne correspond à aucun id, mets son texte dans inconnus. " +
+      "Les soins de toilette, nursing ou dépendance correspondent à l'id dependance.\n\nCatalogue :\n" + list;
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': S.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: S.aiModel || 'claude-haiku-5-5', max_tokens: 500, system, messages: [{ role: 'user', content: text }] })
+    });
+    if (!res.ok) { const t = await res.text(); throw new Error('Erreur ' + res.status + (res.status === 401 ? ' : clé API refusée' : '') + ' ' + t.slice(0, 120)); }
+    const data = await res.json();
+    const out = (data.content || []).map(c => c.text || '').join('');
+    const json = JSON.parse(out.slice(out.indexOf('{'), out.lastIndexOf('}') + 1));
+    const acts = (json.actes || []).filter(a => E.ACTS[a.id] && a.id !== 'manuel').map(a => ({ id: a.id, qty: Math.max(1, Math.min(9, parseInt(a.qty, 10) || 1)) }));
+    return { acts, unknown: json.inconnus || [] };
+  }
+
+  // ---------- rendu ----------
+  const app = $('#app');
+  function setTab(name) { $$('#tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === name)); }
+  function brandTop(title, right) {
+    return '<div class="top"><div class="brand"><img src="icon-180.png" alt=""><h1>' + esc(title) + '</h1></div>' + (right || '') + '</div>';
+  }
+  function backTop(href, label, right) {
+    return '<div class="top"><a class="back" href="' + href + '">‹ ' + esc(label) + '</a>' + (right || '') + '</div>';
+  }
+  function installBanner() {
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    if (standalone || localStorage.getItem('soeur_banner_off')) return '';
+    return '<div class="banner noprint">Pour l’installer sur l’iPhone : bouton <b>Partager</b> de Safari, puis <b>Sur l’écran d’accueil</b>. Utilise ensuite toujours l’icône : les données sont gardées dans l’appli installée. <button class="back" id="bn-off" style="min-height:32px">OK</button></div>';
+  }
+
+  function route() {
+    const h = location.hash.replace(/^#/, '') || 'mois';
+    const [path, query] = h.split('?');
+    const parts = path.split('/');
+    const q = Object.fromEntries(new URLSearchParams(query || ''));
+    window.scrollTo(0, 0);
+    switch (parts[0]) {
+      case 'cabinets': setTab('cabinets'); return viewCabinets();
+      case 'cabinet': setTab('cabinets'); return viewCabinet(parts[1]);
+      case 'patients': setTab('patients'); return viewPatients();
+      case 'patient': setTab('patients'); return viewPatient(parts[1]);
+      case 'ajout': setTab(''); return viewAjout(q);
+      case 'reglages': setTab('reglages'); return viewReglages();
+      case 'tarifs': setTab('reglages'); return viewTarifs();
+      case 'detail': setTab('mois'); return viewDetail(q);
+      default: setTab('mois'); return viewMois();
+    }
+  }
+  window.addEventListener('hashchange', route);
+
+  // ----- Mois -----
+  function monthNav() {
+    return '<div class="rowx noprint" style="margin-bottom:12px"><button class="icon-btn" id="m-prev" aria-label="Mois précédent" style="background:#fff">‹</button>' +
+      '<div style="font-weight:700;font-size:17px;text-transform:capitalize">' + monthLabel(UI.month) + '</div>' +
+      '<button class="icon-btn" id="m-next" aria-label="Mois suivant" style="background:#fff">›</button></div>';
+  }
+  function bindMonthNav() {
+    $('#m-prev').onclick = () => { UI.month = shiftMonth(UI.month, -1); route(); };
+    $('#m-next').onclick = () => { UI.month = shiftMonth(UI.month, 1); route(); };
+  }
+  function viewMois() {
+    if (!S.cabinets.length) {
+      app.innerHTML = installBanner() + '<div class="empty"><img src="logo-full.png" alt="Soeuringue"><h2>Bienvenue</h2><p class="note">Commence par créer le cabinet où tu remplaces. Tu pourras en ajouter d’autres ensuite.</p></div>' +
+        '<button class="btn accent" id="first-cab">Créer mon premier cabinet</button><a class="btn ghost" href="#reglages" style="margin-top:10px">Importer mes patients depuis un tableau</a>';
+      bindBanner();
+      $('#first-cab').onclick = () => editCabinet(null);
+      return;
+    }
+    const d = monthData(UI.month);
+    const ecart = d.tot.recu - d.tot.part;
+    let h = installBanner() + brandTop('Soeuringue') + monthNav();
+    h += '<div class="hero"><div class="lbl">Ce que tu devrais toucher</div><div class="big">' + eur0(d.tot.part) + '</div>' +
+      '<div class="sub">' + eur(d.tot.facture) + ' facturés par les titulaires · rétrocession déduite</div>' +
+      '<div class="row soft"><span>Reçu des titulaires</span><span>' + eur(d.tot.recu) + '</span></div>' +
+      (d.tot.recu > 0 || d.tot.part > 0 ? '<div class="row white ' + (ecart >= -0.5 ? 'ok' : '') + '"><span>' + (ecart >= -0.5 ? 'Tout est reçu' : 'Il manque') + '</span><span>' + (ecart >= -0.5 ? '✓' : eur(-ecart)) + '</span></div>' : '') +
+      '</div>';
+    h += '<div class="section">Par cabinet</div>';
+    S.cabinets.forEach(c => {
+      const b = d.byCab[c.id]; const e = b.recu - b.part;
+      const pill = b.part === 0 && b.recu === 0 ? '' : e >= -0.5 ? '<span class="pill ok">OK</span>' : '<span class="pill warn">− ' + eur0(-e) + '</span>';
+      h += '<a class="card" href="#cabinet/' + c.id + '" style="display:block;text-decoration:none;color:inherit"><div class="rowx" style="margin-bottom:10px"><b style="font-size:16px">' + esc(c.nom) + '</b>' + pill + '</div>' +
+        '<div class="grid3"><div>Facturé<b>' + eur0(b.facture) + '</b></div><div>Ta part<b>' + eur0(b.part) + '</b></div><div>Reçu<b>' + eur0(b.recu) + '</b></div></div></a>';
+    });
+    h += '<div class="btns"><a class="btn" href="#ajout">+ Ajouter un soin</a></div>';
+    h += '<a class="btn ghost" href="#detail">Détail du mois (PDF)</a>';
+    app.innerHTML = h; bindMonthNav(); bindBanner();
+  }
+  function bindBanner() { const b = $('#bn-off'); if (b) b.onclick = () => { localStorage.setItem('soeur_banner_off', '1'); route(); }; }
+
+  // ----- Cabinets -----
+  function viewCabinets() {
+    const d = monthData(UI.month);
+    let h = brandTop('Cabinets');
+    if (!S.cabinets.length) h += '<p class="note">Aucun cabinet pour l’instant.</p>';
+    else {
+      h += '<div class="list">';
+      S.cabinets.forEach(c => {
+        const n = S.patients.filter(p => p.cabinetId === c.id).length;
+        h += '<a class="item" href="#cabinet/' + c.id + '"><div><div class="t">' + esc(c.nom) + '</div><div class="s">Rétrocession ' + (c.retro || 0) + ' % · ' + n + ' patient' + (n > 1 ? 's' : '') + '</div></div><span class="v">' + eur0(d.byCab[c.id].part) + '</span></a>';
+      });
+      h += '</div><p class="note">Montants : ta part en ' + monthLabel(UI.month) + '.</p>';
+    }
+    h += '<button class="btn accent" id="new-cab">+ Nouveau cabinet</button>';
+    app.innerHTML = h; $('#new-cab').onclick = () => editCabinet(null);
+  }
+  function editCabinet(id) {
+    const c = id ? cab(id) : { nom: '', retro: 10 };
+    sheet('<h2>' + (id ? 'Modifier le cabinet' : 'Nouveau cabinet') + '</h2>' +
+      '<label class="f" for="c-nom">Nom du cabinet ou du titulaire</label><input class="in" id="c-nom" value="' + esc(c.nom) + '" autocomplete="off">' +
+      '<label class="f" for="c-retro">Rétrocession au titulaire (%)</label><input class="in" id="c-retro" type="number" inputmode="decimal" min="0" max="100" step="0.5" value="' + esc(c.retro) + '">' +
+      '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="c-ok">Enregistrer</button></div>' +
+      (id ? '<button class="btn danger" id="c-del">Supprimer ce cabinet</button>' : ''),
+      (m, close) => {
+        $('#c-ok', m).onclick = () => {
+          const nom = $('#c-nom', m).value.trim(); if (!nom) return toast('Donne un nom au cabinet');
+          const retro = parseFloat(String($('#c-retro', m).value).replace(',', '.')) || 0;
+          if (id) Object.assign(c, { nom, retro }); else S.cabinets.push({ id: uid(), nom, retro });
+          save(); close(); route();
+        };
+        const del = $('#c-del', m);
+        if (del) del.onclick = () => {
+          const n = S.patients.filter(p => p.cabinetId === id).length;
+          if (n) return toast('Déplace ou supprime d’abord ses ' + n + ' patient(s)');
+          confirmBox('Supprimer « ' + c.nom + ' » ?', 'Supprimer', () => { S.cabinets = S.cabinets.filter(x => x.id !== id); S.virements = S.virements.filter(v => v.cabinetId !== id); save(); close(); location.hash = '#cabinets'; });
+        };
+      });
+  }
+  function viewCabinet(id) {
+    const c = cab(id); if (!c) { location.hash = '#cabinets'; return; }
+    const d = monthData(UI.month); const b = d.byCab[id];
+    const pts = S.patients.filter(p => p.cabinetId === id).sort((a, b2) => (d.byPat[b2.id] || 0) - (d.byPat[a.id] || 0));
+    let h = backTop('#cabinets', 'Cabinets', '<button class="back" id="cab-edit">Modifier</button>');
+    h += '<h1 style="font-size:26px;margin:0 0 2px">' + esc(c.nom) + '</h1><p class="note" style="margin:0 0 12px">Rétrocession ' + (c.retro || 0) + ' % · ' + pts.length + ' patient(s)</p>';
+    h += monthNav();
+    h += '<div class="card grid3"><div>Facturé<b>' + eur(b.facture) + '</b></div><div>Ta part<b>' + eur(b.part) + '</b></div><div>Reçu<b style="color:' + (b.recu + 0.5 < b.part ? 'var(--warn)' : 'var(--ink)') + '">' + eur(b.recu) + '</b></div></div>';
+    h += '<button class="btn ghost" id="vir-add">Noter un virement reçu</button>';
+    const virs = S.virements.filter(v => v.cabinetId === id && v.mois === UI.month);
+    if (virs.length) {
+      h += '<div class="section">Virements pour ' + monthLabel(UI.month) + '</div><div class="list">';
+      virs.forEach(v => h += '<button class="item" data-vir="' + v.id + '"><div><div class="t">' + eur(v.montant) + '</div><div class="s">Reçu le ' + dateCourt(v.date) + (v.note ? ' · ' + esc(v.note) : '') + '</div></div><span class="s">Modifier</span></button>');
+      h += '</div>';
+    }
+    h += '<div class="section">Patients</div>';
+    if (pts.length) {
+      h += '<div class="list">';
+      pts.forEach(p => {
+        const ss = S.soins.filter(s => s.patientId === p.id && (!s.end || s.end >= today()));
+        h += '<a class="item" href="#patient/' + p.id + '"><div><div class="t">' + esc(p.nom) + '</div><div class="s">' + esc(ss.slice(0, 2).map(s => actsText(s.acts)).join(' · ') || 'Aucun soin en cours') + '</div></div><span class="v">' + eur0(d.byPat[p.id] || 0) + '</span></a>';
+      });
+      h += '</div>';
+    } else h += '<p class="note">Aucun patient dans ce cabinet.</p>';
+    h += '<div class="btns"><a class="btn" href="#ajout?cabinet=' + id + '">+ Ajouter un soin</a></div>';
+    app.innerHTML = h; bindMonthNav();
+    $('#cab-edit').onclick = () => editCabinet(id);
+    $('#vir-add').onclick = () => editVirement(id, null);
+    $$('[data-vir]').forEach(el => el.onclick = () => editVirement(id, el.dataset.vir));
+  }
+  function editVirement(cabId, vid) {
+    const v = vid ? S.virements.find(x => x.id === vid) : { montant: '', date: today(), mois: UI.month, note: '' };
+    let opts = ''; for (let i = -6; i <= 1; i++) { const ym = shiftMonth(UI.month, i); opts += '<option value="' + ym + '"' + (ym === v.mois ? ' selected' : '') + '>' + monthLabel(ym) + '</option>'; }
+    sheet('<h2>' + (vid ? 'Modifier le virement' : 'Virement reçu') + '</h2><p class="note">' + esc(cab(cabId).nom) + '</p>' +
+      '<label class="f" for="v-m">Montant reçu (€)</label><input class="in" id="v-m" type="number" inputmode="decimal" step="0.01" value="' + esc(v.montant) + '">' +
+      '<label class="f" for="v-mois">Pour le mois de</label><select class="in" id="v-mois">' + opts + '</select>' +
+      '<label class="f" for="v-d">Date de réception</label><input class="in" id="v-d" type="date" value="' + esc(v.date) + '">' +
+      '<label class="f" for="v-n">Note (facultatif)</label><input class="in" id="v-n" value="' + esc(v.note) + '">' +
+      '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="v-ok">Enregistrer</button></div>' +
+      (vid ? '<button class="btn danger" id="v-del">Supprimer</button>' : ''),
+      (m, close) => {
+        $('#v-ok', m).onclick = () => {
+          const montant = parseFloat(String($('#v-m', m).value).replace(',', '.'));
+          if (!(montant >= 0)) return toast('Indique le montant reçu');
+          const data = { montant, mois: $('#v-mois', m).value, date: $('#v-d', m).value || today(), note: $('#v-n', m).value.trim() };
+          if (vid) Object.assign(v, data); else S.virements.push(Object.assign({ id: uid(), cabinetId: cabId }, data));
+          save(); close(); route();
+        };
+        const del = $('#v-del', m); if (del) del.onclick = () => { S.virements = S.virements.filter(x => x.id !== vid); save(); close(); route(); };
+      });
+  }
+
+  // ----- Patients -----
+  function viewPatients() {
+    const d = monthData(UI.month);
+    let h = brandTop('Patients') + '<input class="in noprint" id="p-search" placeholder="Rechercher un patient" autocomplete="off" style="margin-bottom:12px">';
+    h += '<div id="p-list"></div><div class="btns"><a class="btn" href="#ajout">+ Ajouter un soin</a></div>';
+    app.innerHTML = h;
+    const draw = () => {
+      const qv = norm($('#p-search').value);
+      let out = '';
+      S.cabinets.forEach(c => {
+        const pts = S.patients.filter(p => p.cabinetId === c.id && (!qv || norm(p.nom).includes(qv))).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+        if (!pts.length) return;
+        out += '<div class="section">' + esc(c.nom) + '</div><div class="list">';
+        pts.forEach(p => out += '<a class="item" href="#patient/' + p.id + '"><div><div class="t">' + esc(p.nom) + '</div><div class="s">' + badges(p) + '</div></div><span class="v">' + eur0(d.byPat[p.id] || 0) + '</span></a>');
+        out += '</div>';
+      });
+      $('#p-list').innerHTML = out || '<p class="note">Aucun patient' + (qv ? ' trouvé' : ' pour l’instant') + '.</p>';
+    };
+    $('#p-search').oninput = draw; draw();
+  }
+  function badges(p) {
+    const b = [];
+    if (p.bsi) b.push(p.bsi);
+    if (p.diab) b.push('Diabétique sous insuline');
+    if (p.cancer) b.push('Cancéreux / immunodéprimé');
+    if (p.palliatif) b.push('Soins palliatifs');
+    if (p.enfant7) b.push('Moins de 7 ans');
+    if (p.km > 0) b.push(p.km + ' km');
+    return esc(b.join(' · ') || 'Patient');
+  }
+  function patientFields(p, prefix) {
+    const bs = ['', 'BSA', 'BSB', 'BSC'];
+    return '<label class="f" for="' + prefix + 'bsi">Forfait dépendance (BSI)</label><select class="in" id="' + prefix + 'bsi">' +
+      bs.map(x => '<option value="' + x + '"' + ((p.bsi || '') === x ? ' selected' : '') + '>' + (x ? x + ' (' + eur(S.tarifs[x.toLowerCase()]) + ' / jour)' : 'Pas de BSI') + '</option>').join('') + '</select>' +
+      '<label class="chk"><span>Diabétique sous insuline</span><input type="checkbox" id="' + prefix + 'diab"' + (p.diab ? ' checked' : '') + '></label>' +
+      '<label class="chk"><span>Cancéreux ou immunodéprimé</span><input type="checkbox" id="' + prefix + 'cancer"' + (p.cancer ? ' checked' : '') + '></label>' +
+      '<label class="chk"><span>Soins palliatifs (MCI à chaque passage)</span><input type="checkbox" id="' + prefix + 'pall"' + (p.palliatif ? ' checked' : '') + '></label>' +
+      '<label class="chk"><span>Enfant de moins de 7 ans</span><input type="checkbox" id="' + prefix + 'enf"' + (p.enfant7 ? ' checked' : '') + '></label>' +
+      '<label class="f" for="' + prefix + 'km">Distance hors agglomération (km, aller) — laisser 0 en ville</label><input class="in" id="' + prefix + 'km" type="number" inputmode="decimal" min="0" step="0.5" value="' + esc(p.km || 0) + '">';
+  }
+  function readPatientFields(m, prefix) {
+    return { bsi: $('#' + prefix + 'bsi', m).value || '', diab: $('#' + prefix + 'diab', m).checked, cancer: $('#' + prefix + 'cancer', m).checked,
+      palliatif: $('#' + prefix + 'pall', m).checked, enfant7: $('#' + prefix + 'enf', m).checked, km: parseFloat(String($('#' + prefix + 'km', m).value).replace(',', '.')) || 0 };
+  }
+  function editPatient(id) {
+    const p = pat(id);
+    sheet('<h2>Modifier le patient</h2><label class="f" for="pe-nom">Nom</label><input class="in" id="pe-nom" value="' + esc(p.nom) + '" autocomplete="off">' +
+      '<label class="f" for="pe-cab">Cabinet</label><select class="in" id="pe-cab">' + S.cabinets.map(c => '<option value="' + c.id + '"' + (c.id === p.cabinetId ? ' selected' : '') + '>' + esc(c.nom) + '</option>').join('') + '</select>' +
+      patientFields(p, 'pe-') +
+      '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="pe-ok">Enregistrer</button></div><button class="btn danger" id="pe-del">Supprimer ce patient</button>',
+      (m, close) => {
+        $('#pe-ok', m).onclick = () => {
+          const nom = $('#pe-nom', m).value.trim(); if (!nom) return toast('Indique le nom');
+          Object.assign(p, { nom, cabinetId: $('#pe-cab', m).value }, readPatientFields(m, 'pe-')); save(); close(); route();
+        };
+        $('#pe-del', m).onclick = () => confirmBox('Supprimer ' + p.nom + ' et tous ses soins ?', 'Supprimer', () => {
+          S.patients = S.patients.filter(x => x.id !== id); S.soins = S.soins.filter(s => s.patientId !== id); save(); close(); location.hash = '#patients';
+        });
+      });
+  }
+  function cotationBox(passages, title) {
+    if (!passages.length) return '<div class="cot"><div class="h">' + esc(title) + '</div><div class="note">Aucun soin ce jour-là.</div></div>';
+    let h = '<div class="cot"><div class="h">' + esc(title) + '</div>';
+    let tot = 0;
+    passages.forEach(ps => {
+      if (passages.length > 1) h += '<div style="font-weight:700;margin-top:6px">Passage de ' + ps.heure.replace(':', ' h ') + '</div>';
+      ps.lines.forEach(l => h += '<div class="line"><span>' + esc(l.label.replace(/ (Entier|Demi|Gratuit|Inclus)$/, '')) + '<span class="tag ' + l.taux + '">' + l.taux + '</span><br><span class="d">' + esc(l.detail) + '</span></span><b>' + eur(l.montant) + '</b></div>');
+      tot += ps.total;
+    });
+    return h + '<div class="line tot"><span>Total facturé</span><span>' + eur(tot) + '</span></div></div>';
+  }
+  function viewPatient(id) {
+    const p = pat(id); if (!p) { location.hash = '#patients'; return; }
+    const c = cab(p.cabinetId);
+    const d = monthData(UI.month);
+    const soins = S.soins.filter(s => s.patientId === id).sort((a, b) => (a.heure || '').localeCompare(b.heure || ''));
+    const actifs = soins.filter(s => !s.end || s.end >= today()), finis = soins.filter(s => s.end && s.end < today());
+    let h = backTop('#cabinet/' + p.cabinetId, c ? c.nom : 'Cabinet', '<button class="back" id="pt-edit">Modifier</button>');
+    h += '<h1 style="font-size:26px;margin:0 0 2px">' + esc(p.nom) + '</h1><p class="note" style="margin:0 0 12px">' + badges(p) + '</p>';
+    h += '<div class="section">Soins prévus</div>';
+    const soinItem = s => '<div class="item" style="cursor:default"><div><div class="t">' + esc((s.heure || '').replace(':', ' h ')) + ' — ' + esc(actsText(s.acts)) + '</div><div class="s">' + esc(recText(s)) + (s.dimanche ? ' · dim./fériés' : '') + (s.nuit ? ' · nuit' : '') + '</div></div>' +
+      '<div style="display:flex;gap:6px"><a class="icon-btn" style="display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:15px" href="#ajout?soin=' + s.id + '" aria-label="Modifier ce soin">✎</a><button class="icon-btn" data-soin-menu="' + s.id + '" aria-label="Plus d’options">⋯</button></div></div>';
+    h += actifs.length ? '<div class="list">' + actifs.map(soinItem).join('') + '</div>' : '<p class="note">Aucun soin en cours.</p>';
+    h += '<div class="btns"><a class="btn" href="#ajout?patient=' + id + '">+ Ajouter un soin</a></div>';
+    h += '<div class="section">Cotation d’un jour</div><input class="in" type="date" id="pt-date" value="' + UI.patientDate + '">';
+    h += cotationBox(E.coteJour(p, S.soins, UI.patientDate, { tarifs: S.tarifs, regles: S.regles }), dateFr(UI.patientDate));
+    h += '<div class="card rowx" style="margin-top:12px;background:var(--ink);color:#fff"><div><div style="font-size:13px;opacity:.85">Facturé en ' + monthLabel(UI.month) + '</div><div style="font-size:13px;opacity:.85">ta part : ' + eur((d.byPat[id] || 0) * (1 - ((c && c.retro) || 0) / 100)) + '</div></div><b style="font-size:22px">' + eur(d.byPat[id] || 0) + '</b></div>';
+    if (finis.length) h += '<div class="section">Soins terminés</div><div class="list">' + finis.map(soinItem).join('') + '</div>';
+    app.innerHTML = h;
+    $('#pt-edit').onclick = () => editPatient(id);
+    $('#pt-date').onchange = e => { UI.patientDate = e.target.value || today(); route(); };
+    $$('[data-soin-menu]').forEach(b => b.onclick = () => soinMenu(b.dataset.soinMenu));
+  }
+  function soinMenu(sid) {
+    const s = S.soins.find(x => x.id === sid);
+    sheet('<h2>' + esc(actsText(s.acts)) + '</h2><p class="note">' + esc(recText(s)) + '</p>' +
+      '<button class="btn ghost" id="sm-stop" style="margin-top:12px">Arrêter ce soin à partir d’aujourd’hui</button>' +
+      '<button class="btn ghost" id="sm-dup" style="margin-top:10px">Dupliquer (autre horaire)</button>' +
+      '<button class="btn danger" id="sm-del" style="margin-top:10px">Supprimer (efface aussi le passé)</button>' +
+      '<button class="btn" data-close style="margin-top:10px">Fermer</button>',
+      (m, close) => {
+        $('#sm-stop', m).onclick = () => { s.end = E.addDays(today(), -1) < s.start ? s.start : E.addDays(today(), -1); save(); close(); toast('Soin arrêté'); route(); };
+        $('#sm-dup', m).onclick = () => { close(); location.hash = '#ajout?dup=' + sid; };
+        $('#sm-del', m).onclick = () => confirmBox('Supprimer ce soin, passé compris ?', 'Supprimer', () => { S.soins = S.soins.filter(x => x.id !== sid); save(); close(); route(); });
+      });
+  }
+
+  // ----- Ajout / modification d'un soin -----
+  function viewAjout(q) {
+    if (!S.cabinets.length) { toast('Crée d’abord un cabinet'); location.hash = '#mois'; return; }
+    const existing = q.soin ? S.soins.find(s => s.id === q.soin) : null;
+    const dup = q.dup ? S.soins.find(s => s.id === q.dup) : null;
+    const base = existing || dup;
+    const p0 = base ? pat(base.patientId) : q.patient ? pat(q.patient) : null;
+    UI.draft = {
+      id: existing ? existing.id : null,
+      cabinetId: p0 ? p0.cabinetId : (q.cabinet || (S.cabinets.length === 1 ? S.cabinets[0].id : (UI.lastCab && cab(UI.lastCab) ? UI.lastCab : S.cabinets[0].id))),
+      patientId: p0 ? p0.id : null, patientName: p0 ? p0.nom : '',
+      newP: { bsi: '', diab: false, cancer: false, palliatif: false, enfant7: false, km: 0 },
+      texte: '', acts: base ? JSON.parse(JSON.stringify(base.acts)) : [], unknown: [],
+      heure: base ? (dup ? '' : base.heure) : '08:00',
+      rec: base ? JSON.parse(JSON.stringify(base.rec)) : { type: 'daily', days: [1, 2, 3, 4, 5] },
+      start: base ? base.start : today(), end: base ? (base.end || '') : '',
+      dimanche: base ? !!base.dimanche : true, nuit: base ? !!base.nuit : false
+    };
+    drawAjout();
+  }
+  function drawAjout() {
+    const D = UI.draft;
+    let h = '<div class="top"><a class="back" href="javascript:history.back()">Annuler</a><b style="font-size:17px">' + (D.id ? 'Modifier le soin' : 'Nouveau soin') + '</b><span style="width:60px"></span></div>';
+    h += '<label class="f" for="a-cab">Cabinet</label><select class="in" id="a-cab">' + S.cabinets.map(c => '<option value="' + c.id + '"' + (c.id === D.cabinetId ? ' selected' : '') + '>' + esc(c.nom) + '</option>').join('') + '</select>';
+    h += '<label class="f" for="a-txt">Soins du passage — tape ou dicte (micro du clavier)</label>' +
+      '<textarea class="in" id="a-txt" placeholder="ex : pansement d’escarre + insuline + glycémie">' + esc(D.texte) + '</textarea>' +
+      '<div class="btns"><button class="btn ghost small" id="a-local" style="flex:1">Reconnaître</button>' +
+      (S.apiKey ? '<button class="btn ghost small" id="a-ai" style="flex:1">Demander à l’IA</button>' : '') + '</div>';
+    if (D.unknown.length) h += '<div class="unknown">Pas reconnu : <b>' + D.unknown.map(esc).join(', ') + '</b>. Ajoute l’acte à la main ci-dessous' + (S.apiKey ? ' ou demande à l’IA' : '') + '.</div>';
+    h += '<div class="section" style="margin-top:14px">Actes de ce passage</div><div id="a-acts">';
+    if (!D.acts.length) h += '<p class="note">Aucun acte pour l’instant.</p>';
+    D.acts.forEach((a, i) => {
+      const def = E.ACTS[a.id] || E.ACTS.manuel;
+      h += '<div class="act"><span class="n">' + esc(E.actLabel(a)) + '</span><span class="c">' + (def.manuel ? 'AMI ' + E.fmtCoef(a.coef || 0) : def.dependance ? 'forfait' : (def.di ? 'DI ' : 'AMI ') + E.fmtCoef(def.c)) + '</span>' +
+        '<span class="qty"><button class="icon-btn" data-minus="' + i + '" aria-label="Moins">−</button><span>' + a.qty + '</span><button class="icon-btn" data-plus="' + i + '" aria-label="Plus">+</button></span></div>';
+    });
+    h += '</div><button class="btn ghost small" id="a-addact" style="width:100%">+ Ajouter un acte à la main</button>';
+
+    h += '<label class="f" for="a-pat">Patient</label><input class="in" id="a-pat" value="' + esc(D.patientName) + '" placeholder="Premières lettres du nom" autocomplete="off" autocapitalize="words"><div id="a-sugg"></div><div id="a-newp"></div>';
+    h += '<label class="f" for="a-h">Heure du passage</label><input class="in" type="time" id="a-h" value="' + esc(D.heure) + '">';
+    h += '<label class="f">Fréquence</label><div class="chips" id="a-rec">' +
+      [['once', 'Une fois'], ['daily', 'Tous les jours'], ['every2', 'Tous les 2 jours'], ['weekdays', 'Certains jours']].map(([k, l]) => '<button class="chip' + (D.rec.type === k ? ' on' : '') + '" data-rec="' + k + '" aria-pressed="' + (D.rec.type === k) + '">' + l + '</button>').join('') + '</div>';
+    if (D.rec.type === 'weekdays') h += '<div class="days">' + JOURS_ORDRE.map(d => '<button class="chip' + ((D.rec.days || []).includes(d) ? ' on' : '') + '" data-day="' + d + '" aria-label="' + JOURS_LONG[d] + '">' + JOURS[d] + '</button>').join('') + '</div>';
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><label class="f" for="a-start">' + (D.rec.type === 'once' ? 'Date' : 'À partir du') + '</label><input class="in" type="date" id="a-start" value="' + esc(D.start) + '"></div>' +
+      (D.rec.type === 'once' ? '' : '<div><label class="f" for="a-end">Jusqu’au (facultatif)</label><input class="in" type="date" id="a-end" value="' + esc(D.end) + '"></div>') + '</div>';
+    h += '<label class="chk"><span>Dimanches et fériés (sur l’ordonnance)</span><input type="checkbox" id="a-dim"' + (D.dimanche ? ' checked' : '') + '></label>';
+    h += '<label class="chk"><span>Passage de nuit (sur l’ordonnance)</span><input type="checkbox" id="a-nuit"' + (D.nuit ? ' checked' : '') + '></label>';
+    h += '<div id="a-cot"></div>';
+    h += '<div class="btns"><button class="btn" id="a-save">Enregistrer</button></div>';
+    app.innerHTML = h;
+    bindAjout(); drawSugg(); drawPreview();
+  }
+  function syncDraft() {
+    const D = UI.draft;
+    D.cabinetId = $('#a-cab').value; D.texte = $('#a-txt').value; D.patientName = $('#a-pat').value;
+    D.heure = $('#a-h').value; D.start = $('#a-start').value || today();
+    const e = $('#a-end'); D.end = e ? e.value : '';
+    D.dimanche = $('#a-dim').checked; D.nuit = $('#a-nuit').checked;
+    const np = $('#np-bsi'); if (np) D.newP = readPatientFields(app, 'np-');
+  }
+  function bindAjout() {
+    const D = UI.draft;
+    $('#a-cab').onchange = () => { syncDraft(); UI.lastCab = D.cabinetId; const p = D.patientId && pat(D.patientId); if (p && p.cabinetId !== D.cabinetId) { D.patientId = null; } drawSugg(); drawPreview(); };
+    $('#a-local').onclick = () => {
+      syncDraft();
+      if (!D.texte.trim()) return toast('Tape ou dicte d’abord les soins');
+      const r = parseLocal(D.texte); mergeActs(r.acts); D.unknown = r.unknown; drawAjout();
+      if (!r.acts.length) toast('Rien reconnu, ajoute les actes à la main');
+    };
+    const ai = $('#a-ai');
+    if (ai) ai.onclick = async () => {
+      syncDraft();
+      if (!D.texte.trim()) return toast('Tape ou dicte d’abord les soins');
+      if (!navigator.onLine) { const r = parseLocal(D.texte); mergeActs(r.acts); D.unknown = r.unknown; drawAjout(); return toast('Pas de réseau : reconnaissance locale utilisée'); }
+      ai.disabled = true; ai.textContent = 'L’IA réfléchit…';
+      try { const r = await parseAI(D.texte); D.acts = []; mergeActs(r.acts); D.unknown = r.unknown; drawAjout(); toast('Vérifie les actes proposés'); }
+      catch (e) { const r = parseLocal(D.texte); mergeActs(r.acts); D.unknown = r.unknown; drawAjout(); toast('IA indisponible, reconnaissance locale utilisée'); console.warn(e); }
+    };
+    $$('[data-minus]').forEach(b => b.onclick = () => { syncDraft(); const i = +b.dataset.minus; D.acts[i].qty--; if (D.acts[i].qty <= 0) D.acts.splice(i, 1); drawAjout(); });
+    $$('[data-plus]').forEach(b => b.onclick = () => { syncDraft(); const i = +b.dataset.plus; D.acts[i].qty = Math.min(9, D.acts[i].qty + 1); drawAjout(); });
+    $('#a-addact').onclick = () => { syncDraft(); pickAct(); };
+    $('#a-pat').oninput = () => { D.patientName = $('#a-pat').value; D.patientId = null; drawSugg(); drawPreview(); };
+    $$('[data-rec]').forEach(b => b.onclick = () => { syncDraft(); D.rec.type = b.dataset.rec; if (b.dataset.rec === 'weekdays' && !(D.rec.days || []).length) D.rec.days = [1, 2, 3, 4, 5]; drawAjout(); });
+    $$('[data-day]').forEach(b => b.onclick = () => { syncDraft(); const d = +b.dataset.day; D.rec.days = (D.rec.days || []).includes(d) ? D.rec.days.filter(x => x !== d) : (D.rec.days || []).concat(d); drawAjout(); });
+    ['#a-h', '#a-start', '#a-dim', '#a-nuit', '#a-end'].forEach(s => { const el = $(s); if (el) el.onchange = () => { syncDraft(); drawPreview(); }; });
+    $('#a-save').onclick = saveSoin;
+  }
+  function mergeActs(list) {
+    const D = UI.draft;
+    list.forEach(a => { const ex = D.acts.find(x => x.id === a.id && a.id !== 'manuel'); if (ex) ex.qty = Math.min(9, ex.qty + a.qty); else D.acts.push({ id: a.id, qty: a.qty }); });
+  }
+  function pickAct() {
+    const groups = {};
+    Object.entries(E.ACTS).forEach(([k, v]) => { (groups[v.g] = groups[v.g] || []).push([k, v]); });
+    let h = '<h2>Ajouter un acte</h2>';
+    Object.entries(groups).forEach(([g, items]) => {
+      h += '<div class="section">' + esc(g) + '</div><div class="list">';
+      items.forEach(([k, v]) => h += '<button class="item" data-pick="' + k + '"><span class="t" style="font-weight:600">' + esc(v.l) + '</span><span class="s">' + (v.manuel ? 'coef. libre' : v.dependance ? 'forfait' : (v.di ? 'DI ' : 'AMI ') + E.fmtCoef(v.c)) + '</span></button>');
+      h += '</div>';
+    });
+    h += '<button class="btn" data-close>Fermer</button>';
+    sheet(h, (m, close) => $$('[data-pick]', m).forEach(b => b.onclick = () => {
+      const id = b.dataset.pick;
+      if (id === 'manuel') { close(); return manualAct(); }
+      mergeActs([{ id, qty: 1 }]); close(); drawAjout();
+    }));
+  }
+  function manualAct() {
+    sheet('<h2>Acte manuel</h2><p class="note">Pour un cas particulier : tu choisis toi-même le coefficient et le taux.</p>' +
+      '<label class="f" for="ma-l">Nom de l’acte</label><input class="in" id="ma-l" placeholder="ex : Soin de bouche">' +
+      '<label class="f" for="ma-c">Coefficient AMI</label><input class="in" id="ma-c" type="number" inputmode="decimal" step="0.01" value="1">' +
+      '<label class="f" for="ma-t">Taux</label><select class="in" id="ma-t"><option value="">Selon l’article 11B</option><option value="1">Toujours à taux plein</option><option value="0.5">Toujours à 50 %</option></select>' +
+      '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="ma-ok">Ajouter</button></div>',
+      (m, close) => $('#ma-ok', m).onclick = () => {
+        const coef = parseFloat(String($('#ma-c', m).value).replace(',', '.')); if (!(coef > 0)) return toast('Coefficient invalide');
+        const a = { id: 'manuel', qty: 1, coef, label: $('#ma-l', m).value.trim() || 'Acte manuel' };
+        const t = $('#ma-t', m).value; if (t) a.taux = parseFloat(t);
+        UI.draft.acts.push(a); close(); drawAjout();
+      });
+  }
+  function drawSugg() {
+    const D = UI.draft; const box = $('#a-sugg'); const np = $('#a-newp');
+    const qv = norm(D.patientName).trim();
+    const list = S.patients.filter(p => p.cabinetId === D.cabinetId && (!qv || norm(p.nom).includes(qv)));
+    const exact = S.patients.find(p => p.cabinetId === D.cabinetId && norm(p.nom) === qv);
+    if (exact) D.patientId = exact.id;
+    box.innerHTML = (!D.patientId && qv && list.length) ? '<div class="sugg">' + list.slice(0, 6).map(p => '<button data-sp="' + p.id + '">' + esc(p.nom) + '<span class="note"> — ' + esc(badges(p)) + '</span></button>').join('') + '</div>' : '';
+    $$('[data-sp]', box).forEach(b => b.onclick = () => { syncDraft(); const p = pat(b.dataset.sp); D.patientId = p.id; D.patientName = p.nom; $('#a-pat').value = p.nom; drawSugg(); drawPreview(); });
+    if (!D.patientId && qv) {
+      np.innerHTML = '<div class="card" style="margin-top:10px"><b>Nouveau patient : ' + esc(D.patientName.trim()) + '</b>' + patientFields(D.newP, 'np-') + '</div>';
+      $$('select, input', np).forEach(el => el.onchange = () => { syncDraft(); drawPreview(); });
+    } else if (D.patientId) {
+      const p = pat(D.patientId);
+      np.innerHTML = '<p class="note" style="margin:6px 4px 0">' + badges(p) + '</p>';
+    } else np.innerHTML = '';
+  }
+  function draftPatient() {
+    const D = UI.draft;
+    if (D.patientId) return pat(D.patientId);
+    return Object.assign({ id: '__new', nom: D.patientName, cabinetId: D.cabinetId }, D.newP);
+  }
+  function drawPreview() {
+    const D = UI.draft; const box = $('#a-cot'); if (!box) return;
+    if (!D.acts.length) { box.innerHTML = ''; return; }
+    const p = draftPatient();
+    const tmp = { id: '__draft', patientId: p.id, heure: D.heure || '08:00', acts: D.acts, rec: D.rec, start: D.start || today(), end: D.end, dimanche: D.dimanche, nuit: D.nuit };
+    const others = S.soins.filter(s => s.patientId === p.id && s.id !== D.id);
+    // premier jour où le soin a lieu
+    let day = tmp.start; for (let i = 0; i < 14 && !E.occursOn(tmp, day); i++) day = E.addDays(day, 1);
+    const pass = E.coteJour(p, others.concat([tmp]), day, { tarifs: S.tarifs, regles: S.regles }).filter(ps => ps.heure === tmp.heure);
+    let html = cotationBox(pass, 'Cotation calculée — ' + dateFr(day) + (others.some(s => E.occursOn(s, day) && (s.heure || '08:00') === tmp.heure) ? ' (avec les autres soins de ce passage)' : ''));
+    if (D.acts.some(a => a.id === 'dependance') && !p.bsi) html += '<div class="unknown">Ce patient n’a pas de niveau BSI : choisis BSA, BSB ou BSC dans sa fiche pour que le forfait soit compté.</div>';
+    box.innerHTML = html;
+  }
+  function saveSoin() {
+    syncDraft();
+    const D = UI.draft;
+    if (!D.acts.length) return toast('Ajoute au moins un acte');
+    if (!D.patientName.trim()) return toast('Indique le patient');
+    if (D.rec.type === 'weekdays' && !(D.rec.days || []).length) return toast('Choisis au moins un jour');
+    if (D.end && D.end < D.start) return toast('La date de fin est avant le début');
+    let pid = D.patientId;
+    if (!pid) { const np = Object.assign({ id: uid(), nom: D.patientName.trim(), cabinetId: D.cabinetId }, D.newP); S.patients.push(np); pid = np.id; }
+    const data = { patientId: pid, heure: D.heure || '08:00', acts: D.acts, rec: D.rec, start: D.start || today(), end: D.rec.type === 'once' ? '' : (D.end || ''), dimanche: D.dimanche, nuit: D.nuit };
+    if (D.id) Object.assign(S.soins.find(s => s.id === D.id), data); else S.soins.push(Object.assign({ id: uid() }, data));
+    UI.lastCab = D.cabinetId;
+    save(); toast('Soin enregistré'); location.hash = '#patient/' + pid;
+  }
+
+  // ----- Détail du mois (PDF) -----
+  function viewDetail(q) {
+    const cabId = q.cabinet || '';
+    const cabs = cabId ? S.cabinets.filter(c => c.id === cabId) : S.cabinets;
+    const d = monthData(UI.month);
+    let h = '<div class="noprint">' + backTop('#mois', 'Mois') + monthNav() +
+      '<select class="in" id="dt-cab" style="margin-bottom:12px"><option value="">Tous les cabinets</option>' + S.cabinets.map(c => '<option value="' + c.id + '"' + (c.id === cabId ? ' selected' : '') + '>' + esc(c.nom) + '</option>').join('') + '</select>' +
+      '<button class="btn accent" id="dt-print" style="margin-bottom:14px">Exporter en PDF</button></div>';
+    h += '<div class="print-only" style="margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px"><img src="icon-180.png" alt="" style="width:40px;height:40px;border-radius:9px"><div><b style="font-size:18px">Soeuringue — détail de ' + monthLabel(UI.month) + '</b><div class="note">Estimation calculée selon la NGAP, édité le ' + dateCourt(today()) + '</div></div></div></div>';
+    cabs.forEach(c => {
+      const b = d.byCab[c.id];
+      const rows = d.passages.filter(ps => { const p = pat(ps.patientId); return p && p.cabinetId === c.id; })
+        .sort((a, b2) => a.date.localeCompare(b2.date) || a.heure.localeCompare(b2.heure) || pat(a.patientId).nom.localeCompare(pat(b2.patientId).nom));
+      h += '<h2 style="font-size:19px;margin:16px 0 8px">' + esc(c.nom) + '</h2>';
+      h += '<div class="card grid3"><div>Facturé<b>' + eur(b.facture) + '</b></div><div>Ta part (' + (100 - (c.retro || 0)) + ' %)<b>' + eur(b.part) + '</b></div><div>Reçu<b>' + eur(b.recu) + '</b></div></div>';
+      if (b.recu + 0.5 < b.part) h += '<p class="note" style="color:var(--warn);font-weight:700;margin:0 4px 10px">Écart : il manque ' + eur(b.part - b.recu) + '</p>';
+      if (!rows.length) { h += '<p class="note">Aucun soin ce mois-ci.</p>'; return; }
+      h += '<div class="tablewrap"><table class="det"><thead><tr><th>Date</th><th>Heure</th><th>Patient</th><th>Acte</th><th class="m">Montant</th></tr></thead><tbody>';
+      rows.forEach(ps => {
+        const nm = esc(pat(ps.patientId).nom);
+        ps.lines.forEach((l, i) => {
+          h += '<tr><td>' + (i === 0 ? dateCourt(ps.date) : '') + '</td><td>' + (i === 0 ? ps.heure : '') + '</td><td>' + (i === 0 ? nm : '') + '</td><td>' + esc(l.label) + '<div class="note" style="font-size:11px">' + esc(l.detail) + '</div></td><td class="m">' + eur(l.montant) + '</td></tr>';
+        });
+        h += '<tr><td colspan="4" style="text-align:right;color:var(--muted);font-size:12px">Total du passage</td><td class="m"><b>' + eur(ps.total) + '</b></td></tr>';
+      });
+      h += '</tbody></table></div>';
+    });
+    h += '<p class="note">Estimation à partir des soins saisis. Elle ne remplace pas la facturation des titulaires.</p>';
+    app.innerHTML = h; bindMonthNav();
+    $('#dt-cab').onchange = e => { location.hash = '#detail' + (e.target.value ? '?cabinet=' + e.target.value : ''); };
+    $('#dt-print').onclick = () => window.print();
+  }
+
+  // ----- Réglages -----
+  function viewReglages() {
+    let h = brandTop('Réglages');
+    h += '<div class="list"><a class="item" href="#cabinets"><div><div class="t">Cabinets et rétrocession</div><div class="s">' + S.cabinets.length + ' cabinet(s)</div></div><span class="s">›</span></a>' +
+      '<a class="item" href="#tarifs"><div><div class="t">Tarifs NGAP</div><div class="s">AMI ' + eur(E.amiValue(today(), S.tarifs)) + ' aujourd’hui · avenant 11</div></div><span class="s">›</span></a></div>';
+    h += '<div class="section">Règles</div>';
+    h += '<label class="chk"><span>MAU possible sur un passage BSI</span><input type="checkbox" id="r-mau"' + (S.regles.mauJourBsi ? ' checked' : '') + '></label>';
+    h += '<label class="f" for="r-diab">Dextro + insuline à 100 % avec le BSI à partir du</label><input class="in" type="date" id="r-diab" value="' + esc(S.regles.diabBsiPleinDepuis) + '">';
+    h += '<p class="note">Un jour de BSI, les actes non dérogatoires sont comptés comme inclus dans le forfait (règle de la brochure).</p>';
+    h += '<div class="section">Assistant IA (facultatif)</div><div class="card"><p class="note" style="margin-top:0">Sert seulement à traduire les phrases compliquées en actes. Seul le texte des soins est envoyé, jamais le nom du patient. Sans clé, la reconnaissance locale fonctionne quand même, même sans réseau.</p>' +
+      '<label class="f" for="r-key">Clé API Anthropic</label><input class="in" id="r-key" type="password" autocomplete="off" placeholder="sk-ant-…" value="' + esc(S.apiKey) + '">' +
+      '<label class="f" for="r-model">Modèle</label><input class="in" id="r-model" value="' + esc(S.aiModel) + '" autocomplete="off" autocapitalize="off">' +
+      '<div class="btns"><button class="btn ghost small" id="r-test" style="flex:1">Tester</button><button class="btn accent small" id="r-keysave" style="flex:1">Enregistrer</button></div></div>';
+    h += '<div class="section">Sauvegarde</div><div class="card"><p class="note" style="margin-top:0">Les données restent uniquement sur ce téléphone. Fais une sauvegarde chiffrée régulièrement (par exemple dans Fichiers ou iCloud Drive) pour ne rien perdre si tu changes de téléphone.</p>' +
+      '<div class="btns"><button class="btn small" id="r-exp" style="flex:1">Sauvegarder</button><button class="btn ghost small" id="r-imp" style="flex:1">Restaurer</button></div><input type="file" id="r-file" accept=".json,application/json" hidden></div>';
+    h += '<div class="section">Importer des patients</div><div class="card"><p class="note" style="margin-top:0">Depuis Google Sheets ou Excel : exporte le tableau en <b>CSV</b>, puis choisis le fichier ici. Tu indiques ensuite quelle colonne correspond à quoi. Le fichier reste sur ce téléphone.</p>' +
+      '<button class="btn small" id="r-csv" style="width:100%">Choisir un fichier CSV</button><input type="file" id="r-csvfile" accept=".csv,text/csv,text/plain" hidden></div>';
+    h += '<button class="btn danger" id="r-wipe" style="margin-top:8px">Tout effacer</button>';
+    h += '<p class="note" style="text-align:center;margin-top:18px">Soeuringue · estimation selon la NGAP (avenant 11), brochure Idelstory et guide CBA. Pour les cas tordus, utilise l’acte manuel.</p>';
+    app.innerHTML = h;
+    $('#r-mau').onchange = e => { S.regles.mauJourBsi = e.target.checked; save(); };
+    $('#r-diab').onchange = e => { S.regles.diabBsiPleinDepuis = e.target.value || '2028-01-01'; save(); };
+    $('#r-keysave').onclick = () => { S.apiKey = $('#r-key').value.trim(); S.aiModel = $('#r-model').value.trim() || 'claude-haiku-5-5'; save(); toast('Enregistré'); };
+    $('#r-test').onclick = async () => {
+      S.apiKey = $('#r-key').value.trim(); S.aiModel = $('#r-model').value.trim() || 'claude-haiku-5-5'; save();
+      if (!S.apiKey) return toast('Colle d’abord la clé');
+      try { const r = await parseAI('pansement d’escarre + insuline + glycémie'); toast('Ça marche : ' + r.acts.map(a => E.actLabel(a)).join(', ')); }
+      catch (e) { toast(e.message.slice(0, 90)); }
+    };
+    $('#r-exp').onclick = exportBackup;
+    $('#r-imp').onclick = () => $('#r-file').click();
+    $('#r-file').onchange = e => { const f = e.target.files[0]; if (f) importBackup(f); e.target.value = ''; };
+    $('#r-csv').onclick = () => $('#r-csvfile').click();
+    $('#r-csvfile').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (f) importCsv(await f.text()); };
+    $('#r-wipe').onclick = () => confirmBox('Effacer toutes les données de l’appli ?', 'Tout effacer', () => { const k = S.apiKey; S = blank(); S.apiKey = k; save(); location.hash = '#mois'; route(); });
+  }
+  function viewTarifs() {
+    const T = S.tarifs;
+    const num = (k, l) => '<label class="f" for="t-' + k + '">' + l + '</label><input class="in" id="t-' + k + '" type="number" inputmode="decimal" step="0.01" value="' + esc(T[k]) + '">';
+    let h = backTop('#reglages', 'Réglages') + '<h1 style="font-size:24px;margin:0 0 8px">Tarifs NGAP</h1>';
+    h += '<div class="section">Lettre-clé AMI / AMX</div><div id="t-ami">';
+    T.ami.forEach((p, i) => h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><label class="f" for="ta-f' + i + '">À partir du</label><input class="in" type="date" id="ta-f' + i + '" value="' + esc(p.from) + '"></div><div><label class="f" for="ta-v' + i + '">Valeur (€)</label><input class="in" type="number" step="0.01" inputmode="decimal" id="ta-v' + i + '" value="' + esc(p.value) + '"></div></div>');
+    h += '</div><button class="btn ghost small" id="t-addp" style="width:100%;margin-top:10px">+ Ajouter une revalorisation</button>';
+    h += '<div class="section">Déplacements</div>' + num('ifd', 'IFD (€)') + num('ifi', 'IFI — patient BSI (€)') + num('ik', 'IK plaine (€ / km)');
+    h += '<div class="section">Majorations</div>' + num('mci', 'MCI (€)') + num('mau', 'MAU (€)') + num('dimanche', 'Dimanche / férié (€)') + num('nuit1', 'Nuit 20h-23h et 5h-8h (€)') + num('nuit2', 'Nuit 23h-5h (€)') + num('mie', 'MIE (€)');
+    h += '<div class="section">Forfaits BSI</div>' + num('bsa', 'BSA (€ / jour)') + num('bsb', 'BSB (€ / jour)') + num('bsc', 'BSC (€ / jour)') + num('di', 'Lettre-clé DI (€)');
+    h += '<div class="btns"><button class="btn ghost" id="t-reset">Valeurs par défaut</button><button class="btn accent" id="t-save">Enregistrer</button></div>';
+    app.innerHTML = h;
+    $('#t-addp').onclick = () => { readTarifs(); S.tarifs.ami.push({ from: today(), value: E.amiValue(today(), S.tarifs) }); route(); };
+    $('#t-save').onclick = () => { readTarifs(); save(); toast('Tarifs enregistrés'); location.hash = '#reglages'; };
+    $('#t-reset').onclick = () => confirmBox('Revenir aux tarifs par défaut ?', 'Rétablir', () => { S.tarifs = JSON.parse(JSON.stringify(E.DEFAULT_TARIFS)); save(); route(); });
+  }
+  function readTarifs() {
+    const T = S.tarifs; const f = v => parseFloat(String(v).replace(',', '.'));
+    T.ami = T.ami.map((p, i) => ({ from: $('#ta-f' + i).value || p.from, value: f($('#ta-v' + i).value) || p.value })).sort((a, b) => a.from.localeCompare(b.from));
+    ['ifd', 'ifi', 'ik', 'mci', 'mau', 'dimanche', 'nuit1', 'nuit2', 'mie', 'bsa', 'bsb', 'bsc', 'di'].forEach(k => { const v = f($('#t-' + k).value); if (v >= 0) T[k] = v; });
+  }
+
+  // ---------- import CSV (Google Sheets, Excel) ----------
+  function parseCsv(text) {
+    text = text.replace(/^﻿/, '');
+    const first = text.split(/\r?\n/)[0] || '';
+    const delim = [';', ',', '\t'].map(d => [d, first.split(d).length]).sort((a, b) => b[1] - a[1])[0][0];
+    const rows = []; let row = [], cell = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) {
+        if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+        else cell += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === delim) { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        row.push(cell); rows.push(row); row = []; cell = '';
+      } else cell += ch;
+    }
+    if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+    return rows.map(r => r.map(c => c.trim())).filter(r => r.some(c => c !== ''));
+  }
+  const truthy = v => /^(oui|o|x|1|vrai|true|yes|y|ok|✓|✅)$/i.test(String(v).trim()) || /insulin/i.test(norm(v));
+  function importCsv(text) {
+    const rows = parseCsv(text);
+    if (rows.length < 1) return toast('Fichier vide ou illisible');
+    const head = rows[0];
+    const guess = re => { const i = head.findIndex(h => re.test(norm(h))); return i; };
+    let iNom = guess(/^nom\b|nom de famille|^patient|^nom$/); if (iNom < 0) iNom = head.findIndex(h => /nom/.test(norm(h)) && !/prenom/.test(norm(h)));
+    const iPre = guess(/prenom/), iCab = guess(/cabinet|titulaire|tournee/), iBsi = guess(/bsi|dependan|forfait|\bbs[abc]\b/),
+      iDiab = guess(/diab|insulin/), iCan = guess(/cancer|immuno|onco/), iKm = guess(/\bkm\b|distance|kilom/);
+    const col = (id, label, sel, optional) => '<label class="f" for="' + id + '">' + label + '</label><select class="in" id="' + id + '">' +
+      (optional ? '<option value="-1">— aucune colonne —</option>' : '') +
+      head.map((h, i) => '<option value="' + i + '"' + (i === sel ? ' selected' : '') + '>' + esc(h || ('Colonne ' + (i + 1))) + '</option>').join('') + '</select>';
+    let html = '<h2>Importer des patients</h2><p class="note">' + (rows.length - 1) + ' ligne(s) trouvée(s). Indique les colonnes, puis vérifie l’aperçu.</p>';
+    html += '<label class="chk"><span>La 1re ligne contient les titres</span><input type="checkbox" id="im-head" checked></label>';
+    html += col('im-nom', 'Nom (obligatoire)', iNom < 0 ? 0 : iNom) + col('im-pre', 'Prénom', iPre, true);
+    html += '<label class="f" for="im-cabmode">Cabinet</label><select class="in" id="im-cabmode">' +
+      (iCab >= 0 ? '<option value="col">Pris dans la colonne « ' + esc(head[iCab]) + ' »</option>' : '') +
+      S.cabinets.map(c => '<option value="' + c.id + '">Tous dans : ' + esc(c.nom) + '</option>').join('') +
+      '<option value="new">Tous dans un nouveau cabinet…</option></select><div id="im-newcab"></div>';
+    html += col('im-bsi', 'Niveau BSI (BSA / BSB / BSC)', iBsi, true) + col('im-diab', 'Diabétique sous insuline (oui / x / 1)', iDiab, true) +
+      col('im-can', 'Cancéreux / immunodéprimé (oui / x / 1)', iCan, true) + col('im-km', 'Distance en km', iKm, true);
+    html += '<div class="section">Aperçu</div><div id="im-prev"></div>';
+    html += '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="im-ok">Importer</button></div>';
+    sheet(html, (m, close) => {
+      const v = id => parseInt($('#' + id, m).value, 10);
+      const build = () => {
+        const data = $('#im-head', m).checked ? rows.slice(1) : rows;
+        const mode = $('#im-cabmode', m).value;
+        const newCabName = mode === 'new' ? (($('#im-nc', m) || {}).value || '').trim() : '';
+        const out = [], seen = new Set();
+        data.forEach(r => {
+          const g = i => (i >= 0 && r[i] != null) ? String(r[i]).trim() : '';
+          const nom = [g(v('im-nom')), g(v('im-pre'))].filter(Boolean).join(' ').replace(/\s+/g, ' ');
+          if (!nom) return;
+          const bsiRaw = norm(g(v('im-bsi'))).toUpperCase();
+          const bsi = /BSC/.test(bsiRaw) ? 'BSC' : /BSB/.test(bsiRaw) ? 'BSB' : /BSA/.test(bsiRaw) ? 'BSA' : '';
+          const cabName = mode === 'col' ? g(iCab) : mode === 'new' ? newCabName : (cab(mode) || {}).nom;
+          const k = norm(nom) + '|' + norm(cabName); if (seen.has(k)) return; seen.add(k);
+          out.push({ nom, cabName, cabId: mode !== 'col' && mode !== 'new' ? mode : null, bsi, diab: v('im-diab') >= 0 && truthy(g(v('im-diab'))),
+            cancer: v('im-can') >= 0 && truthy(g(v('im-can'))), km: parseFloat(g(v('im-km')).replace(',', '.')) || 0 });
+        });
+        return out;
+      };
+      const isDup = r => S.patients.some(p => norm(p.nom) === norm(r.nom) && (cab(p.cabinetId) || {}).nom && norm(cab(p.cabinetId).nom) === norm(r.cabName));
+      const preview = () => {
+        $('#im-newcab', m).innerHTML = $('#im-cabmode', m).value === 'new' ? '<label class="f" for="im-nc">Nom du nouveau cabinet</label><input class="in" id="im-nc" autocomplete="off">' : '';
+        const nc = $('#im-nc', m); if (nc) nc.oninput = draw;
+        draw();
+      };
+      const draw = () => {
+        const list = build(); const dups = list.filter(isDup).length;
+        $('#im-prev', m).innerHTML = '<div class="list">' + list.slice(0, 5).map(r => '<div class="item" style="cursor:default"><div><div class="t">' + esc(r.nom) + '</div><div class="s">' + esc([r.cabName || '⚠ cabinet manquant', r.bsi, r.diab ? 'diabétique' : '', r.cancer ? 'cancéreux' : '', r.km ? r.km + ' km' : ''].filter(Boolean).join(' · ')) + '</div></div>' + (isDup(r) ? '<span class="pill info">déjà là</span>' : '') + '</div>').join('') + '</div>' +
+          '<p class="note">' + (list.length - dups) + ' patient(s) à importer' + (dups ? ', ' + dups + ' déjà présent(s) ignoré(s)' : '') + (list.length > 5 ? ' · aperçu des 5 premiers' : '') + '.</p>';
+      };
+      $$('select, input', m).forEach(el => el.onchange = preview);
+      preview();
+      $('#im-ok', m).onclick = () => {
+        const list = build();
+        if ($('#im-cabmode', m).value === 'new' && !(($('#im-nc', m) || {}).value || '').trim()) return toast('Donne un nom au nouveau cabinet');
+        let n = 0, newCabs = 0;
+        list.forEach(r => {
+          if (isDup(r)) return;
+          let cabId = r.cabId;
+          if (!cabId) {
+            const name = r.cabName || 'Cabinet importé';
+            let c = S.cabinets.find(x => norm(x.nom) === norm(name));
+            if (!c) { c = { id: uid(), nom: name, retro: 10 }; S.cabinets.push(c); newCabs++; }
+            cabId = c.id;
+          }
+          S.patients.push({ id: uid(), nom: r.nom, cabinetId: cabId, bsi: r.bsi, diab: r.diab, cancer: r.cancer, palliatif: false, enfant7: false, km: r.km });
+          n++;
+        });
+        save(); close();
+        toast(n + ' patient(s) importé(s)' + (newCabs ? ', ' + newCabs + ' cabinet(s) créé(s) (rétrocession 10 %)' : ''));
+        location.hash = '#patients';
+      };
+    });
+  }
+
+  // ---------- sauvegarde chiffrée ----------
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  async function keyFrom(pass, salt) {
+    const base = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 250000, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  function askPass(title, confirm2, cb) {
+    sheet('<h2>' + esc(title) + '</h2><p class="note">Ce mot de passe protège les noms des patients. Sans lui, la sauvegarde est illisible : note-le bien.</p>' +
+      '<label class="f" for="pp1">Mot de passe</label><input class="in" type="password" id="pp1" autocomplete="new-password">' +
+      (confirm2 ? '<label class="f" for="pp2">Confirmer</label><input class="in" type="password" id="pp2" autocomplete="new-password">' : '') +
+      '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="pp-ok">Continuer</button></div>',
+      (m, close) => $('#pp-ok', m).onclick = () => {
+        const a = $('#pp1', m).value; if (a.length < 6) return toast('6 caractères minimum');
+        if (confirm2 && a !== $('#pp2', m).value) return toast('Les deux mots de passe sont différents');
+        close(); cb(a);
+      });
+  }
+  function exportBackup() {
+    askPass('Sauvegarde chiffrée', true, async pass => {
+      try {
+        const data = Object.assign({}, S); delete data.apiKey;
+        const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+        const key = await keyFrom(pass, salt);
+        const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(data)));
+        const out = JSON.stringify({ app: 'soeuringue', v: 1, salt: b64(salt), iv: b64(iv), data: b64(ct) });
+        const name = 'soeuringue-sauvegarde-' + today() + '.json';
+        const file = new File([out], name, { type: 'application/json' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); }
+        else { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
+        toast('Sauvegarde créée');
+      } catch (e) { if (e.name !== 'AbortError') toast('Sauvegarde impossible : ' + e.message); }
+    });
+  }
+  function importBackup(f) {
+    askPass('Restaurer une sauvegarde', false, async pass => {
+      try {
+        const j = JSON.parse(await f.text());
+        if (j.app !== 'soeuringue') throw new Error('fichier non reconnu');
+        const key = await keyFrom(pass, unb64(j.salt));
+        const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(j.iv) }, key, unb64(j.data));
+        const data = JSON.parse(dec.decode(pt));
+        confirmBox('Remplacer les données actuelles par cette sauvegarde ?', 'Remplacer', () => {
+          const k = S.apiKey; S = Object.assign(blank(), data); S.apiKey = k; save(); toast('Sauvegarde restaurée'); location.hash = '#mois'; route();
+        });
+      } catch (e) { toast(e.name === 'OperationError' ? 'Mot de passe incorrect' : 'Restauration impossible : ' + e.message); }
+    });
+  }
+
+  // ---------- démarrage ----------
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  route();
+})();

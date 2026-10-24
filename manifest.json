@@ -1,0 +1,16 @@
+{
+  "name": "Soeuringue",
+  "short_name": "Soeuringue",
+  "description": "Suivi des soins et des revenus estimés d'une infirmière libérale remplaçante",
+  "lang": "fr",
+  "start_url": "./index.html#mois",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#EEF5FA",
+  "theme_color": "#EAF4FB",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
