@@ -21,8 +21,8 @@ Soeuringue est une appli web installable. Tu la mets en ligne une fois (gratuit)
 1. Dans Google Sheets, ouvre le tableau des patients. Sur ordinateur : **Fichier**, puis **Télécharger**, puis **Valeurs séparées par des virgules (.csv)**. Sur iPhone, dans l'appli Sheets : **⋯**, puis **Partager et exporter**, puis **Enregistrer sous**, puis **CSV**.
 2. S'il y a un onglet par cabinet, exporte chaque onglet séparément.
 3. Dans Soeuringue : **Réglages**, puis **Choisir un fichier CSV**.
-4. Indique quelle colonne est le **nom** (et le **prénom** s'il est à part), puis le **cabinet** : soit pris dans une colonne, soit « tous dans » un cabinet existant ou nouveau. Les colonnes BSI, diabète et km sont facultatives.
-5. Vérifie l'aperçu, puis **Importer**. Les patients déjà présents ne sont pas importés en double. Les cabinets créés automatiquement ont une rétrocession de 10 %, modifiable ensuite.
+4. Indique quelle colonne est le **nom** (et le **prénom** s'il est à part), puis le **cabinet** : soit pris dans une colonne, soit « tous dans » un cabinet existant ou nouveau. Les colonnes adresse, étage, numéro de porte, téléphone, soin (gardé en note) et code d'accès sont reconnues automatiquement. Les colonnes BSI (BSA/BSB/BSC, A/B/C ou légère/intermédiaire/lourde), diabète et km sont facultatives.
+5. Vérifie l'aperçu, puis **Importer**. Les patients déjà présents ne sont pas importés en double : leur fiche est seulement complétée avec les infos qui manquaient (rien n'est écrasé). Les cabinets créés automatiquement ont une rétrocession de 10 %, modifiable ensuite.
 
 ## 4. Premiers pas
 
@@ -41,7 +41,7 @@ Dans **Réglages**, puis **Sauvegarder** : ça crée un fichier chiffré par un 
 
 ## 7. Mise à jour de l'appli
 
-Remplace les fichiers dans le dépôt GitHub. Dans `sw.js`, change le numéro de version (`soeuringue-v1.1.0` devient `v1.1.1`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
+Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.2.1` devient `v1.2.2`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
 
 ---
 Les montants sont des **estimations** calculées selon la NGAP (avenant 11), la brochure Idelstory et le guide CBA. Les tarifs et les règles sont modifiables dans Réglages. Pour un cas particulier, il y a **Ajouter un acte à la main**, puis **Acte manuel**.

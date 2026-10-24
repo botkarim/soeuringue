@@ -37,7 +37,10 @@
   // lourd : déclenche la MCI ; derogBsi : facturable en AMX un jour de BSI
   // diab : fait partie de la « parenthèse du diabétique »
   const ACTS = {
-    dependance:      { l: 'Soins de dépendance (BSI)', c: 0, dependance: true, g: 'BSI' },
+    bsa_f:           { l: 'Forfait BSA (dépendance légère)', c: 0, dependance: true, niveau: 'BSA', g: 'BSI' },
+    bsb_f:           { l: 'Forfait BSB (dépendance intermédiaire)', c: 0, dependance: true, niveau: 'BSB', g: 'BSI' },
+    bsc_f:           { l: 'Forfait BSC (dépendance lourde)', c: 0, dependance: true, niveau: 'BSC', g: 'BSI' },
+    dependance:      { l: 'Soins de dépendance (niveau de la fiche)', c: 0, dependance: true, g: 'BSI' },
     bsi_initial:     { l: 'Bilan BSI initial (DI 2,5)', c: 2.5, di: true, g: 'BSI' },
     bsi_renouv:      { l: 'Bilan BSI renouvellement (DI 1,2)', c: 1.2, di: true, g: 'BSI' },
 
@@ -178,7 +181,10 @@
     const p = ctx.patient || {};
     const date = ctx.date;
     const v = amiValue(date, T);
-    const bsiDay = !!(ctx.bsiDay && p.bsi);
+    const isDepAct = a => !!(ACTS[a.id] && ACTS[a.id].dependance);
+    const actLevel = (ctx.acts || []).map(a => ACTS[a.id] && ACTS[a.id].niveau).filter(Boolean).sort().pop();
+    const level = ctx.bsiLevel || actLevel || p.bsi || '';
+    const bsiDay = !!(ctx.bsiDay && level);
     const letter = bsiDay ? 'AMX' : 'AMI';
     const lines = [];
     const push = (code, label, taux, montant, detail) => lines.push({ code, label, taux, montant: round2(montant), detail: detail || '' });
@@ -187,8 +193,8 @@
     let acts = [];
     (ctx.acts || []).forEach(a => { const q = Math.max(1, Math.round(a.qty || 1)); for (let i = 0; i < q; i++) acts.push(Object.assign({}, a, { qty: 1 })); });
 
-    const hasDependance = acts.some(a => a.id === 'dependance');
-    acts = acts.filter(a => a.id !== 'dependance');
+    const hasDependance = acts.some(isDepAct);
+    acts = acts.filter(a => !isDepAct(a));
 
     // bilans BSI (DI) : à part, pas d'article 11B
     acts.filter(a => ACTS[a.id] && ACTS[a.id].di).forEach(a => {
@@ -198,9 +204,9 @@
 
     // forfait BSI (part de ce passage)
     if (bsiDay && hasDependance && ctx.forfaitShare > 0) {
-      const f = T[String(p.bsi).toLowerCase()] || 0;
+      const f = T[String(level).toLowerCase()] || 0;
       const share = ctx.forfaitShare;
-      push(p.bsi, '1 ' + p.bsi + (share < 1 ? ' (' + Math.round(share * 100) + ' % du forfait)' : ''), 'Entier', f * share, 'Forfait journalier' + (share < 1 ? ' réparti sur les passages' : ''));
+      push(level, '1 ' + level + (share < 1 ? ' (' + Math.round(share * 100) + ' % du forfait)' : ''), 'Entier', f * share, 'Forfait journalier' + (share < 1 ? ' réparti sur les passages' : ''));
     }
 
     // passage « astreinte » seul : pas de déplacement ni majoration
@@ -349,13 +355,16 @@
       byH[k].soins.push(s.id);
     });
     const passages = Object.values(byH).sort((a, b) => a.heure.localeCompare(b.heure));
-    const depPassages = passages.filter(ps => ps.acts.some(a => a.id === 'dependance'));
-    const bsiDay = !!patient.bsi && depPassages.length > 0;
+    const isDep = ps => ps.acts.some(a => ACTS[a.id] && ACTS[a.id].dependance);
+    const depPassages = passages.filter(isDep);
+    // niveau du jour : celui tapé dans le soin (le plus élevé s'il y en a plusieurs), sinon celui de la fiche
+    const lv = passages.flatMap(ps => ps.acts).map(a => ACTS[a.id] && ACTS[a.id].niveau).filter(Boolean).sort().pop() || patient.bsi || '';
+    const bsiDay = !!lv && depPassages.length > 0;
     return passages.map(ps => {
-      const isDep = ps.acts.some(a => a.id === 'dependance');
+      const dep = isDep(ps);
       const r = cotePassage({
         date, heure: ps.heure, patient, acts: ps.acts, dimanche: ps.dimanche, nuit: ps.nuit,
-        bsiDay, forfaitShare: isDep ? 1 / depPassages.length : 0,
+        bsiDay, bsiLevel: lv, forfaitShare: dep ? 1 / depPassages.length : 0,
         tarifs: opts.tarifs, regles: opts.regles
       });
       return { date, heure: ps.heure, patientId: patient.id, soins: ps.soins, lines: r.lines, total: r.total };

@@ -103,7 +103,10 @@
     [/bas de contention|\btension\b|constantes|temperature|saturation/, 'HORS'],
     [/renouvel.*bsi|bsi.*renouvel|\bdi ?1[,.]2/, 'bsi_renouv'],
     [/bilan.*bsi|bsi initial|\bdi ?2[,.]5/, 'bsi_initial'],
-    [/\bbs[abci]\b|dependan|toilette|nursing|hygiene|\bbsi\b/, 'dependance'],
+    [/\bbsa\b|(dependance|bsi|forfait) leger/, 'bsa_f'],
+    [/\bbsb\b|(dependance|bsi|forfait) intermediaire/, 'bsb_f'],
+    [/\bbsc\b|(dependance|bsi|forfait) lourd/, 'bsc_f'],
+    [/dependan|toilette|nursing|hygiene|\bbsi\b/, 'dependance'],
     [/\bvac\b|\btpn\b|pression negative/, 'tpn'],
     [/compression|bandes? de contention sur|urgo ?k2|coban|biflex/, 'pans_compression'],
     [/stomie|tracheo/, 'stomie'],
@@ -163,7 +166,7 @@
     const system = "Tu convertis une description de soins infirmiers libéraux (dictée ou tapée, en français, parfois avec des abréviations) en actes d'un catalogue NGAP. " +
       "Réponds UNIQUEMENT avec un objet JSON de la forme {\"actes\":[{\"id\":\"...\",\"qty\":1}],\"inconnus\":[\"...\"]}. " +
       "N'utilise que les id du catalogue ci-dessous. qty = nombre d'actes identiques au même passage. Si un soin ne correspond à aucun id, mets son texte dans inconnus. " +
-      "Les soins de toilette, nursing ou dépendance correspondent à l'id dependance.\n\nCatalogue :\n" + list;
+      "Les forfaits BSA, BSB, BSC (dépendance légère, intermédiaire, lourde) correspondent à bsa_f, bsb_f, bsc_f. Toilette, nursing ou dépendance sans niveau précisé : dependance.\n\nCatalogue :\n" + list;
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': S.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
@@ -371,10 +374,23 @@
     if (p.km > 0) b.push(p.km + ' km');
     return esc(b.join(' · ') || 'Patient');
   }
+  function coordFields(p, prefix) {
+    const f = (k, l, type, ph) => '<label class="f" for="' + prefix + k + '">' + l + '</label><input class="in" id="' + prefix + k + '"' + (type ? ' type="' + type + '"' : '') + ' value="' + esc(p[k] || '') + '" placeholder="' + (ph || '') + '" autocomplete="off">';
+    return f('adresse', 'Adresse', '', 'n°, rue, code postal, ville') +
+      '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">' +
+      '<div>' + f('code', 'Code d’accès', '', '') + '</div><div>' + f('etage', 'Étage', '', '') + '</div><div>' + f('porte', 'Porte', '', '') + '</div></div>' +
+      f('tel', 'Téléphone', 'tel', '06…') +
+      '<label class="f" for="' + prefix + 'noteSoin">Note de soin</label><textarea class="in" id="' + prefix + 'noteSoin" placeholder="ex : pansement complexe mollet gauche tous les jours">' + esc(p.noteSoin || '') + '</textarea>';
+  }
+  function readCoord(m, prefix) {
+    const o = {}; ['adresse', 'code', 'etage', 'porte', 'tel', 'noteSoin'].forEach(k => { const el = $('#' + prefix + k, m); if (el) o[k] = el.value.trim(); });
+    return o;
+  }
+  function mapsUrl(p) { return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.adresse); }
   function patientFields(p, prefix) {
     const bs = ['', 'BSA', 'BSB', 'BSC'];
     return '<label class="f" for="' + prefix + 'bsi">Forfait dépendance (BSI)</label><select class="in" id="' + prefix + 'bsi">' +
-      bs.map(x => '<option value="' + x + '"' + ((p.bsi || '') === x ? ' selected' : '') + '>' + (x ? x + ' (' + eur(S.tarifs[x.toLowerCase()]) + ' / jour)' : 'Pas de BSI') + '</option>').join('') + '</select>' +
+      bs.map(x => '<option value="' + x + '"' + ((p.bsi || '') === x ? ' selected' : '') + '>' + (x ? x + ' (' + eur(S.tarifs[x.toLowerCase()]) + ' / jour)' : 'Pas de BSI') + '</option>').join('') + '</select><p class="note" style="margin:4px 4px 0">Niveau par défaut. Si tu tapes BSA, BSB ou BSC dans un soin, c’est ce niveau-là qui compte.</p>' +
       '<label class="chk"><span>Diabétique sous insuline</span><input type="checkbox" id="' + prefix + 'diab"' + (p.diab ? ' checked' : '') + '></label>' +
       '<label class="chk"><span>Cancéreux ou immunodéprimé</span><input type="checkbox" id="' + prefix + 'cancer"' + (p.cancer ? ' checked' : '') + '></label>' +
       '<label class="chk"><span>Soins palliatifs (MCI à chaque passage)</span><input type="checkbox" id="' + prefix + 'pall"' + (p.palliatif ? ' checked' : '') + '></label>' +
@@ -389,12 +405,15 @@
     const p = pat(id);
     sheet('<h2>Modifier le patient</h2><label class="f" for="pe-nom">Nom</label><input class="in" id="pe-nom" value="' + esc(p.nom) + '" autocomplete="off">' +
       '<label class="f" for="pe-cab">Cabinet</label><select class="in" id="pe-cab">' + S.cabinets.map(c => '<option value="' + c.id + '"' + (c.id === p.cabinetId ? ' selected' : '') + '>' + esc(c.nom) + '</option>').join('') + '</select>' +
-      patientFields(p, 'pe-') +
+      coordFields(p, 'pe-') + patientFields(p, 'pe-') +
       '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="pe-ok">Enregistrer</button></div><button class="btn danger" id="pe-del">Supprimer ce patient</button>',
       (m, close) => {
         $('#pe-ok', m).onclick = () => {
           const nom = $('#pe-nom', m).value.trim(); if (!nom) return toast('Indique le nom');
-          Object.assign(p, { nom, cabinetId: $('#pe-cab', m).value }, readPatientFields(m, 'pe-')); save(); close(); route();
+          const hadAddr = p.adresse;
+          Object.assign(p, { nom, cabinetId: $('#pe-cab', m).value }, readPatientFields(m, 'pe-'), readCoord(m, 'pe-')); save(); close();
+          if (p.adresse && p.adresse !== hadAddr) UI.mapsPrompt = p.id;
+          route();
         };
         $('#pe-del', m).onclick = () => confirmBox('Supprimer ' + p.nom + ' et tous ses soins ?', 'Supprimer', () => {
           S.patients = S.patients.filter(x => x.id !== id); S.soins = S.soins.filter(s => s.patientId !== id); save(); close(); location.hash = '#patients';
@@ -420,6 +439,16 @@
     const actifs = soins.filter(s => !s.end || s.end >= today()), finis = soins.filter(s => s.end && s.end < today());
     let h = backTop('#cabinet/' + p.cabinetId, c ? c.nom : 'Cabinet', '<button class="back" id="pt-edit">Modifier</button>');
     h += '<h1 style="font-size:26px;margin:0 0 2px">' + esc(p.nom) + '</h1><p class="note" style="margin:0 0 12px">' + badges(p) + '</p>';
+    if (p.adresse || p.code || p.etage || p.porte || p.tel) {
+      h += '<div class="card">';
+      if (p.adresse) h += '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Adresse</div><div style="font-size:16px;font-weight:600;line-height:1.35;margin:2px 0 10px">' + esc(p.adresse) + '</div>';
+      const box = (l, v) => '<div style="background:var(--bg);border-radius:12px;padding:10px"><div style="font-size:12px;color:var(--muted)">' + l + '</div><div style="font-size:20px;font-weight:800;letter-spacing:.5px;word-break:break-all">' + (v ? esc(v) : '—') + '</div></div>';
+      if (p.code || p.etage || p.porte) h += '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:10px">' + box('Code', p.code) + box('Étage', p.etage) + box('Porte', p.porte) + '</div>';
+      h += '<div style="display:grid;grid-template-columns:repeat(' + ((p.adresse && p.tel) ? 2 : 1) + ',minmax(0,1fr));gap:8px">' +
+        (p.adresse ? '<a class="btn accent" style="min-height:48px;font-size:15px" href="' + mapsUrl(p) + '" target="_blank" rel="noopener">Google Maps</a>' : '') +
+        (p.tel ? '<a class="btn ghost" style="min-height:48px;font-size:15px" href="tel:' + esc(p.tel.replace(/[^\d+]/g, '')) + '">' + esc(p.tel) + '</a>' : '') + '</div></div>';
+    }
+    if (p.noteSoin) h += '<div class="card" style="background:#FDF6E8"><div style="font-size:12px;font-weight:700;color:#7A5A12;text-transform:uppercase;letter-spacing:.5px">Note de soin</div><div style="margin:6px 0 8px;line-height:1.4">' + esc(p.noteSoin) + '</div><a href="#ajout?patient=' + id + '&note=1" style="font-weight:700;text-decoration:none">Créer le soin à partir de cette note ›</a></div>';
     h += '<div class="section">Soins prévus</div>';
     const soinItem = s => '<div class="item" style="cursor:default"><div><div class="t">' + esc((s.heure || '').replace(':', ' h ')) + ' — ' + esc(actsText(s.acts)) + '</div><div class="s">' + esc(recText(s)) + (s.dimanche ? ' · dim./fériés' : '') + (s.nuit ? ' · nuit' : '') + '</div></div>' +
       '<div style="display:flex;gap:6px"><a class="icon-btn" style="display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:15px" href="#ajout?soin=' + s.id + '" aria-label="Modifier ce soin">✎</a><button class="icon-btn" data-soin-menu="' + s.id + '" aria-label="Plus d’options">⋯</button></div></div>';
@@ -433,6 +462,11 @@
     $('#pt-edit').onclick = () => editPatient(id);
     $('#pt-date').onchange = e => { UI.patientDate = e.target.value || today(); route(); };
     $$('[data-soin-menu]').forEach(b => b.onclick = () => soinMenu(b.dataset.soinMenu));
+    if (UI.mapsPrompt === id && p.adresse) { UI.mapsPrompt = null; mapsSheet(p); }
+  }
+  function mapsSheet(p) {
+    sheet('<h2>Ajouter dans Google Maps ?</h2><p class="note">Google Maps va s’ouvrir sur l’adresse de ' + esc(p.nom) + '. Touche <b>Enregistrer</b>, puis choisis ta liste de patients.</p>' +
+      '<div class="btns"><button class="btn ghost" data-close>Plus tard</button><a class="btn accent" id="mp-go" href="' + mapsUrl(p) + '" target="_blank" rel="noopener">Ouvrir Maps</a></div>', (m, close) => { $('#mp-go', m).addEventListener('click', () => setTimeout(close, 300)); });
   }
   function soinMenu(sid) {
     const s = S.soins.find(x => x.id === sid);
@@ -459,13 +493,14 @@
       id: existing ? existing.id : null,
       cabinetId: p0 ? p0.cabinetId : (q.cabinet || (S.cabinets.length === 1 ? S.cabinets[0].id : (UI.lastCab && cab(UI.lastCab) ? UI.lastCab : S.cabinets[0].id))),
       patientId: p0 ? p0.id : null, patientName: p0 ? p0.nom : '',
-      newP: { bsi: '', diab: false, cancer: false, palliatif: false, enfant7: false, km: 0 },
-      texte: '', acts: base ? JSON.parse(JSON.stringify(base.acts)) : [], unknown: [],
+      newP: { bsi: '', diab: false, cancer: false, palliatif: false, enfant7: false, km: 0, adresse: '', code: '', etage: '', porte: '', tel: '', noteSoin: '' },
+      texte: (q.note && p0 && p0.noteSoin) ? p0.noteSoin : '', acts: base ? JSON.parse(JSON.stringify(base.acts)) : [], unknown: [],
       heure: base ? (dup ? '' : base.heure) : '08:00',
       rec: base ? JSON.parse(JSON.stringify(base.rec)) : { type: 'daily', days: [1, 2, 3, 4, 5] },
       start: base ? base.start : today(), end: base ? (base.end || '') : '',
       dimanche: base ? !!base.dimanche : true, nuit: base ? !!base.nuit : false
     };
+    if (UI.draft.texte) { const r = parseLocal(UI.draft.texte); mergeActs(r.acts); UI.draft.unknown = r.unknown; if (/dimanche|tous les jours|7j/.test(norm(UI.draft.texte))) UI.draft.dimanche = true; }
     drawAjout();
   }
   function drawAjout() {
@@ -506,7 +541,7 @@
     D.heure = $('#a-h').value; D.start = $('#a-start').value || today();
     const e = $('#a-end'); D.end = e ? e.value : '';
     D.dimanche = $('#a-dim').checked; D.nuit = $('#a-nuit').checked;
-    const np = $('#np-bsi'); if (np) D.newP = readPatientFields(app, 'np-');
+    const np = $('#np-bsi'); if (np) D.newP = Object.assign(readPatientFields(app, 'np-'), readCoord(app, 'np-'));
   }
   function bindAjout() {
     const D = UI.draft;
@@ -577,7 +612,7 @@
     box.innerHTML = (!D.patientId && qv && list.length) ? '<div class="sugg">' + list.slice(0, 6).map(p => '<button data-sp="' + p.id + '">' + esc(p.nom) + '<span class="note"> — ' + esc(badges(p)) + '</span></button>').join('') + '</div>' : '';
     $$('[data-sp]', box).forEach(b => b.onclick = () => { syncDraft(); const p = pat(b.dataset.sp); D.patientId = p.id; D.patientName = p.nom; $('#a-pat').value = p.nom; drawSugg(); drawPreview(); });
     if (!D.patientId && qv) {
-      np.innerHTML = '<div class="card" style="margin-top:10px"><b>Nouveau patient : ' + esc(D.patientName.trim()) + '</b>' + patientFields(D.newP, 'np-') + '</div>';
+      np.innerHTML = '<div class="card" style="margin-top:10px"><b>Nouveau patient : ' + esc(D.patientName.trim()) + '</b>' + patientFields(D.newP, 'np-') + '<details style="margin-top:12px"><summary style="font-weight:700;min-height:44px;display:flex;align-items:center;cursor:pointer">Adresse, code, téléphone (facultatif)</summary>' + coordFields(D.newP, 'np-') + '</details></div>';
       $$('select, input', np).forEach(el => el.onchange = () => { syncDraft(); drawPreview(); });
     } else if (D.patientId) {
       const p = pat(D.patientId);
@@ -599,7 +634,7 @@
     let day = tmp.start; for (let i = 0; i < 14 && !E.occursOn(tmp, day); i++) day = E.addDays(day, 1);
     const pass = E.coteJour(p, others.concat([tmp]), day, { tarifs: S.tarifs, regles: S.regles }).filter(ps => ps.heure === tmp.heure);
     let html = cotationBox(pass, 'Cotation calculée — ' + dateFr(day) + (others.some(s => E.occursOn(s, day) && (s.heure || '08:00') === tmp.heure) ? ' (avec les autres soins de ce passage)' : ''));
-    if (D.acts.some(a => a.id === 'dependance') && !p.bsi) html += '<div class="unknown">Ce patient n’a pas de niveau BSI : choisis BSA, BSB ou BSC dans sa fiche pour que le forfait soit compté.</div>';
+    if (D.acts.some(a => a.id === 'dependance') && !p.bsi && !D.acts.some(a => E.ACTS[a.id] && E.ACTS[a.id].niveau)) html += '<div class="unknown">Niveau de dépendance inconnu : tape BSA, BSB ou BSC, ou choisis le niveau dans la fiche du patient.</div>';
     box.innerHTML = html;
   }
   function saveSoin() {
@@ -610,7 +645,9 @@
     if (D.rec.type === 'weekdays' && !(D.rec.days || []).length) return toast('Choisis au moins un jour');
     if (D.end && D.end < D.start) return toast('La date de fin est avant le début');
     let pid = D.patientId;
-    if (!pid) { const np = Object.assign({ id: uid(), nom: D.patientName.trim(), cabinetId: D.cabinetId }, D.newP); S.patients.push(np); pid = np.id; }
+    if (!pid) { const np = Object.assign({ id: uid(), nom: D.patientName.trim(), cabinetId: D.cabinetId }, D.newP); S.patients.push(np); pid = np.id; if (np.adresse) UI.mapsPrompt = pid; }
+    const lvAct = D.acts.map(a => E.ACTS[a.id] && E.ACTS[a.id].niveau).filter(Boolean).sort().pop();
+    if (lvAct && !pat(pid).bsi) pat(pid).bsi = lvAct;
     const data = { patientId: pid, heure: D.heure || '08:00', acts: D.acts, rec: D.rec, start: D.start || today(), end: D.rec.type === 'once' ? '' : (D.end || ''), dimanche: D.dimanche, nuit: D.nuit };
     if (D.id) Object.assign(S.soins.find(s => s.id === D.id), data); else S.soins.push(Object.assign({ id: uid() }, data));
     UI.lastCab = D.cabinetId;
@@ -729,15 +766,25 @@
     if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
     return rows.map(r => r.map(c => c.trim())).filter(r => r.some(c => c !== ''));
   }
+  function bsiLevel(v) {
+    const t = norm(v).trim(); if (!t) return '';
+    if (/bsc|lourd|^c$|^3$/.test(t)) return 'BSC';
+    if (/bsb|intermed|^b$|^2$/.test(t)) return 'BSB';
+    if (/bsa|leger|^a$|^1$/.test(t)) return 'BSA';
+    return '';
+  }
   const truthy = v => /^(oui|o|x|1|vrai|true|yes|y|ok|✓|✅)$/i.test(String(v).trim()) || /insulin/i.test(norm(v));
   function importCsv(text) {
     const rows = parseCsv(text);
     if (rows.length < 1) return toast('Fichier vide ou illisible');
     const head = rows[0];
     const guess = re => { const i = head.findIndex(h => re.test(norm(h))); return i; };
-    let iNom = guess(/^nom\b|nom de famille|^patient|^nom$/); if (iNom < 0) iNom = head.findIndex(h => /nom/.test(norm(h)) && !/prenom/.test(norm(h)));
-    const iPre = guess(/prenom/), iCab = guess(/cabinet|titulaire|tournee/), iBsi = guess(/bsi|dependan|forfait|\bbs[abc]\b/),
-      iDiab = guess(/diab|insulin/), iCan = guess(/cancer|immuno|onco/), iKm = guess(/\bkm\b|distance|kilom/);
+    let iNom = guess(/^nom\b|nom de famille|^patient|^nom$|nom du patient/); if (iNom < 0) iNom = head.findIndex(h => /nom/.test(norm(h)) && !/prenom/.test(norm(h)));
+    const iPre = guess(/prenom/), iCab = guess(/cabinet|titulaire|tournee/), iBsi = guess(/bsi|dependan|forfait|\bbs[abc]\b|niveau/),
+      iDiab = guess(/diab|insulin/), iCan = guess(/cancer|immuno|onco/), iKm = guess(/\bkm\b|distance|kilom/),
+      iAdr = guess(/adresse|^rue/), iCp = guess(/code postal|^cp$/), iVille = guess(/ville|commune/),
+      iCode = guess(/acces|digicode|interphone|^code$/), iEtage = guess(/etage/), iPorte = guess(/porte|appart/),
+      iTel = guess(/tel|portable|mobile/), iSoin = guess(/soin|note|traitement|ordonnance/);
     const col = (id, label, sel, optional) => '<label class="f" for="' + id + '">' + label + '</label><select class="in" id="' + id + '">' +
       (optional ? '<option value="-1">— aucune colonne —</option>' : '') +
       head.map((h, i) => '<option value="' + i + '"' + (i === sel ? ' selected' : '') + '>' + esc(h || ('Colonne ' + (i + 1))) + '</option>').join('') + '</select>';
@@ -750,6 +797,9 @@
       '<option value="new">Tous dans un nouveau cabinet…</option></select><div id="im-newcab"></div>';
     html += col('im-bsi', 'Niveau BSI (BSA / BSB / BSC)', iBsi, true) + col('im-diab', 'Diabétique sous insuline (oui / x / 1)', iDiab, true) +
       col('im-can', 'Cancéreux / immunodéprimé (oui / x / 1)', iCan, true) + col('im-km', 'Distance en km', iKm, true);
+    html += '<div class="section">Coordonnées</div>' + col('im-adr', 'Adresse', iAdr, true) + col('im-cp', 'Code postal (si à part)', iCp, true) + col('im-ville', 'Ville (si à part)', iVille, true) +
+      col('im-code', 'Code d’accès', iCode, true) + col('im-etage', 'Étage', iEtage, true) + col('im-porte', 'Numéro de porte', iPorte, true) +
+      col('im-tel', 'Téléphone', iTel, true) + col('im-soin', 'Soin (gardé en note)', iSoin, true);
     html += '<div class="section">Aperçu</div><div id="im-prev"></div>';
     html += '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="im-ok">Importer</button></div>';
     sheet(html, (m, close) => {
@@ -763,16 +813,20 @@
           const g = i => (i >= 0 && r[i] != null) ? String(r[i]).trim() : '';
           const nom = [g(v('im-nom')), g(v('im-pre'))].filter(Boolean).join(' ').replace(/\s+/g, ' ');
           if (!nom) return;
-          const bsiRaw = norm(g(v('im-bsi'))).toUpperCase();
-          const bsi = /BSC/.test(bsiRaw) ? 'BSC' : /BSB/.test(bsiRaw) ? 'BSB' : /BSA/.test(bsiRaw) ? 'BSA' : '';
+          const bsi = bsiLevel(g(v('im-bsi')));
           const cabName = mode === 'col' ? g(iCab) : mode === 'new' ? newCabName : (cab(mode) || {}).nom;
           const k = norm(nom) + '|' + norm(cabName); if (seen.has(k)) return; seen.add(k);
           out.push({ nom, cabName, cabId: mode !== 'col' && mode !== 'new' ? mode : null, bsi, diab: v('im-diab') >= 0 && truthy(g(v('im-diab'))),
-            cancer: v('im-can') >= 0 && truthy(g(v('im-can'))), km: parseFloat(g(v('im-km')).replace(',', '.')) || 0 });
+            cancer: v('im-can') >= 0 && truthy(g(v('im-can'))), km: parseFloat(g(v('im-km')).replace(',', '.')) || 0,
+            adresse: [g(v('im-adr')), [g(v('im-cp')), g(v('im-ville'))].filter(Boolean).join(' ')].filter(Boolean).join(', '),
+            code: g(v('im-code')), etage: g(v('im-etage')), porte: g(v('im-porte')), tel: g(v('im-tel')), noteSoin: g(v('im-soin')) });
         });
         return out;
       };
-      const isDup = r => S.patients.some(p => norm(p.nom) === norm(r.nom) && (cab(p.cabinetId) || {}).nom && norm(cab(p.cabinetId).nom) === norm(r.cabName));
+      const findDup = r => S.patients.find(p => norm(p.nom) === norm(r.nom) && (cab(p.cabinetId) || {}).nom && norm(cab(p.cabinetId).nom) === norm(r.cabName));
+      const isDup = r => !!findDup(r);
+      const FILL = ['adresse', 'code', 'etage', 'porte', 'tel', 'noteSoin', 'bsi'];
+      const missing = (p, r) => FILL.filter(k => r[k] && !p[k]);
       const preview = () => {
         $('#im-newcab', m).innerHTML = $('#im-cabmode', m).value === 'new' ? '<label class="f" for="im-nc">Nom du nouveau cabinet</label><input class="in" id="im-nc" autocomplete="off">' : '';
         const nc = $('#im-nc', m); if (nc) nc.oninput = draw;
@@ -780,17 +834,19 @@
       };
       const draw = () => {
         const list = build(); const dups = list.filter(isDup).length;
-        $('#im-prev', m).innerHTML = '<div class="list">' + list.slice(0, 5).map(r => '<div class="item" style="cursor:default"><div><div class="t">' + esc(r.nom) + '</div><div class="s">' + esc([r.cabName || '⚠ cabinet manquant', r.bsi, r.diab ? 'diabétique' : '', r.cancer ? 'cancéreux' : '', r.km ? r.km + ' km' : ''].filter(Boolean).join(' · ')) + '</div></div>' + (isDup(r) ? '<span class="pill info">déjà là</span>' : '') + '</div>').join('') + '</div>' +
-          '<p class="note">' + (list.length - dups) + ' patient(s) à importer' + (dups ? ', ' + dups + ' déjà présent(s) ignoré(s)' : '') + (list.length > 5 ? ' · aperçu des 5 premiers' : '') + '.</p>';
+        const fills = list.filter(r => { const p = findDup(r); return p && missing(p, r).length; }).length;
+        $('#im-prev', m).innerHTML = '<div class="list">' + list.slice(0, 5).map(r => '<div class="item" style="cursor:default"><div><div class="t">' + esc(r.nom) + '</div><div class="s">' + esc([r.cabName || '⚠ cabinet manquant', r.bsi, r.diab ? 'diabétique' : '', r.cancer ? 'cancéreux' : '', r.km ? r.km + ' km' : '', r.adresse, r.code ? 'code ' + r.code : '', r.etage ? 'étage ' + r.etage : '', r.porte ? 'porte ' + r.porte : '', r.tel, r.noteSoin].filter(Boolean).join(' · ')) + '</div></div>' + (isDup(r) ? '<span class="pill info">' + (missing(findDup(r), r).length ? 'à compléter' : 'déjà à jour') + '</span>' : '') + '</div>').join('') + '</div>' +
+          '<p class="note">' + (list.length - dups) + ' nouveau(x) patient(s)' + (fills ? ', ' + fills + ' fiche(s) complétée(s)' : '') + (dups - fills ? ', ' + (dups - fills) + ' déjà à jour' : '') + (list.length > 5 ? ' · aperçu des 5 premiers' : '') + '.</p>';
       };
       $$('select, input', m).forEach(el => el.onchange = preview);
       preview();
       $('#im-ok', m).onclick = () => {
         const list = build();
         if ($('#im-cabmode', m).value === 'new' && !(($('#im-nc', m) || {}).value || '').trim()) return toast('Donne un nom au nouveau cabinet');
-        let n = 0, newCabs = 0;
+        let n = 0, newCabs = 0, nf = 0;
         list.forEach(r => {
-          if (isDup(r)) return;
+          const ex = findDup(r);
+          if (ex) { const ks = missing(ex, r); ks.forEach(k => ex[k] = r[k]); if (ks.length) nf++; return; }
           let cabId = r.cabId;
           if (!cabId) {
             const name = r.cabName || 'Cabinet importé';
@@ -798,11 +854,12 @@
             if (!c) { c = { id: uid(), nom: name, retro: 10 }; S.cabinets.push(c); newCabs++; }
             cabId = c.id;
           }
-          S.patients.push({ id: uid(), nom: r.nom, cabinetId: cabId, bsi: r.bsi, diab: r.diab, cancer: r.cancer, palliatif: false, enfant7: false, km: r.km });
+          S.patients.push({ id: uid(), nom: r.nom, cabinetId: cabId, bsi: r.bsi, diab: r.diab, cancer: r.cancer, palliatif: false, enfant7: false, km: r.km,
+            adresse: r.adresse, code: r.code, etage: r.etage, porte: r.porte, tel: r.tel, noteSoin: r.noteSoin });
           n++;
         });
         save(); close();
-        toast(n + ' patient(s) importé(s)' + (newCabs ? ', ' + newCabs + ' cabinet(s) créé(s) (rétrocession 10 %)' : ''));
+        toast(n + ' nouveau(x) patient(s)' + (nf ? ', ' + nf + ' fiche(s) complétée(s)' : '') + (newCabs ? ', ' + newCabs + ' cabinet(s) créé(s) (rétrocession 10 %)' : ''));
         location.hash = '#patients';
       };
     });
