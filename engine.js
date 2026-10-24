@@ -342,7 +342,9 @@
   // Cotation de toute la journée d'un patient
   function coteJour(patient, soins, date, opts) {
     opts = opts || {};
-    const todays = soins.filter(s => s.patientId === patient.id && occursOn(s, date));
+    const ab = (opts.absences || []).find(a => a.patientId === patient.id && a.date === date);
+    if (ab && !ab.facture) return []; // absent, non facturé : rien ce jour-là
+    const todays = soins.filter(s => s.patientId === patient.id && occursOn(s, date) && (s.acts || []).length);
     if (!todays.length) return [];
     // regrouper par heure → passages
     const byH = {};
@@ -367,7 +369,7 @@
         bsiDay, bsiLevel: lv, forfaitShare: dep ? 1 / depPassages.length : 0,
         tarifs: opts.tarifs, regles: opts.regles
       });
-      return { date, heure: ps.heure, patientId: patient.id, soins: ps.soins, lines: r.lines, total: r.total };
+      return { date, heure: ps.heure, patientId: patient.id, soins: ps.soins, lines: r.lines, total: r.total, absent: !!ab };
     });
   }
 
@@ -378,18 +380,18 @@
     return out;
   }
 
-  function coteMois(state, ym, filter) {
+  function coteJours(state, days, filter) {
     const res = [];
-    const days = monthDays(ym);
     (state.patients || []).forEach(p => {
       if (filter && filter.cabinetId && p.cabinetId !== filter.cabinetId) return;
       if (filter && filter.patientId && p.id !== filter.patientId) return;
-      days.forEach(d => coteJour(p, state.soins || [], d, { tarifs: state.tarifs, regles: state.regles }).forEach(x => res.push(x)));
+      days.forEach(d => coteJour(p, state.soins || [], d, { tarifs: state.tarifs, regles: state.regles, absences: state.absences }).forEach(x => res.push(x)));
     });
     return res;
   }
+  function coteMois(state, ym, filter) { return coteJours(state, monthDays(ym), filter); }
 
-  const api = { ACTS, DEFAULT_TARIFS, DEFAULT_REGLES, cotePassage, coteJour, coteMois, occursOn, amiValue,
+  const api = { ACTS, coteJours, DEFAULT_TARIFS, DEFAULT_REGLES, cotePassage, coteJour, coteMois, occursOn, amiValue,
     isDimancheOuFerie, feries, monthDays, iso, parseIso, addDays, round2, fmtCoef, actCoef, actLabel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Engine = api;

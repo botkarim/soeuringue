@@ -94,7 +94,7 @@ textarea.in{min-height:96px;resize:vertical}
 .sugg{background:#fff;border-radius:14px;margin-top:6px;overflow:hidden;border:1px solid var(--line)}
 .sugg button{display:block;width:100%;text-align:left;padding:12px 14px;border:0;border-bottom:1px solid var(--line);background:#fff;min-height:44px;cursor:pointer}
 .sugg button:last-child{border-bottom:0}
-nav.tabs{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:6px 8px calc(6px + env(safe-area-inset-bottom));z-index:10}
+nav.tabs{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(5,minmax(0,1fr));padding:6px 4px calc(6px + env(safe-area-inset-bottom));z-index:10}
 nav.tabs a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:52px;font-size:11px;font-weight:700;color:var(--muted);text-decoration:none}
 nav.tabs a.on{color:var(--accent)}
 .modal{position:fixed;inset:0;background:rgba(15,30,45,.45);display:flex;align-items:flex-end;justify-content:center;z-index:20}
@@ -108,6 +108,10 @@ table.det th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:v
 table.det td.m,table.det th.m{text-align:right;white-space:nowrap}
 .tablewrap{overflow-x:auto;border-radius:var(--r);background:#fff;margin-bottom:12px}
 .print-only{display:none}
+#splash{position:fixed;inset:0;z-index:100;background:#E4F5FC;display:flex;align-items:center;justify-content:center;transition:opacity .35s ease}
+#splash img{width:min(78vw,380px);height:auto}
+#splash.out{opacity:0;pointer-events:none}
+@media print{#splash{display:none}}
 .g2{display:grid;gap:8px}
 .in.sm{min-width:0;-webkit-appearance:none;appearance:none;min-height:44px;padding:8px 12px;font-size:16px;border-radius:12px}
 .act.sm{padding:2px 4px 2px 12px;margin-bottom:6px;border-radius:12px}
@@ -135,14 +139,17 @@ body.noTabs{padding-bottom:calc(80px + env(safe-area-inset-bottom))}
 </style>
 </head>
 <body>
+<div id="splash" aria-hidden="true"><img src="logo-splash.png" alt=""></div>
 <div id="app" class="wrap"></div>
 <nav class="tabs noprint" id="tabs">
   <a href="#mois" data-tab="mois"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Mois</a>
   <a href="#cabinets" data-tab="cabinets"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21V9l8-5 8 5v12"/><path d="M9 21v-6h6v6"/></svg>Cabinets</a>
   <a href="#patients" data-tab="patients"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>Patients</a>
+  <a href="#soins" data-tab="soins"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M3.5 6l1.5 1.5L7.5 5M3.5 12l1.5 1.5 2.5-2.5M3.5 18l1.5 1.5 2.5-2.5"/></svg>Mes soins</a>
   <a href="#reglages" data-tab="reglages"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Réglages</a>
 </nav>
 <script src="engine.js"></script>
 <script src="app.js"></script>
+<script>setTimeout(function(){var s=document.getElementById('splash');if(s){s.classList.add('out');setTimeout(function(){s.remove()},400)}},1000);</script>
 </body>
 </html>

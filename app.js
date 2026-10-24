@@ -10,12 +10,14 @@
 
   // ---------- état ----------
   let S = load();
-  const UI = { month: E.iso(new Date()).slice(0, 7), draft: null, patientDate: E.iso(new Date()) };
+  const UI = { month: E.iso(new Date()).slice(0, 7), draft: null, patientDate: E.iso(new Date()), soinsVue: 'jour', soinsDate: E.iso(new Date()) };
+  const copts = () => ({ tarifs: S.tarifs, regles: S.regles, absences: S.absences });
+  const nowHM = () => { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
 
   function blank() {
     return { v: 1, cabinets: [], patients: [], soins: [], virements: [],
       tarifs: JSON.parse(JSON.stringify(E.DEFAULT_TARIFS)), regles: Object.assign({}, E.DEFAULT_REGLES),
-      apiKey: '', aiModel: 'claude-haiku-5-5' };
+      apiKey: '', aiModel: 'claude-haiku-5-5', tournees: {}, absences: [], faits: [] };
   }
   function load() {
     try {
@@ -207,6 +209,7 @@
       case 'patients': setTab('patients'); return viewPatients(parts[1]);
       case 'patient': setTab('patients'); return viewPatient(parts[1]);
       case 'ajout': setTab(''); document.body.classList.add('noTabs'); return viewAjout(q);
+      case 'soins': setTab('soins'); return viewSoins();
       case 'reglages': setTab('reglages'); return viewReglages();
       case 'tarifs': setTab('reglages'); return viewTarifs();
       case 'detail': setTab('mois'); return viewDetail(q);
@@ -408,10 +411,11 @@
       '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">' +
       '<div>' + f('code', 'Code d’accès', '', '') + '</div><div>' + f('etage', 'Étage', '', '') + '</div><div>' + f('porte', 'Porte', '', '') + '</div></div>' +
       f('tel', 'Téléphone', 'tel', '06…') +
+      f('nomNote', 'Nom dans la note (si différent)', '', 'ex : Martin') +
       '<label class="f" for="' + prefix + 'noteSoin">Note de soin</label><textarea class="in" id="' + prefix + 'noteSoin" placeholder="ex : pansement complexe mollet gauche tous les jours">' + esc(p.noteSoin || '') + '</textarea>';
   }
   function readCoord(m, prefix) {
-    const o = {}; ['adresse', 'code', 'etage', 'porte', 'tel', 'noteSoin'].forEach(k => { const el = $('#' + prefix + k, m); if (el) o[k] = el.value.trim(); });
+    const o = {}; ['adresse', 'code', 'etage', 'porte', 'tel', 'noteSoin', 'nomNote'].forEach(k => { const el = $('#' + prefix + k, m); if (el) o[k] = el.value.trim(); });
     return o;
   }
   function mapsUrl(p) { return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.adresse); }
@@ -479,8 +483,8 @@
         (p.tel ? '<a class="btn ghost" style="min-height:48px;font-size:15px" href="tel:' + esc(p.tel.replace(/[^\d+]/g, '')) + '">' + esc(p.tel) + '</a>' : '') + '</div></div>';
     }
     if (p.noteSoin) h += '<div class="card" style="background:#FDF6E8"><div style="font-size:12px;font-weight:700;color:#7A5A12;text-transform:uppercase;letter-spacing:.5px">Note de soin</div><div style="margin:6px 0 8px;line-height:1.4">' + esc(p.noteSoin) + '</div><a href="#ajout?patient=' + id + '&note=1" style="font-weight:700;text-decoration:none">Créer le soin à partir de cette note ›</a></div>';
-    const passItem = s => '<div class="item" style="cursor:default;padding:10px 12px 10px 16px"><div><div class="t" style="font-size:15px">' + esc(dateFr(s.start)) + ' · ' + esc((s.heure || '').replace(':', ' h ')) + '</div><div class="s">' + esc(actsText(s.acts)) + '</div></div>' +
-      '<div style="display:flex;gap:6px;align-items:center"><button class="chip" data-redo="' + s.id + '" style="min-height:40px;padding:0 10px;font-size:13px">Refaire aujourd’hui</button><button class="icon-btn" data-soin-menu="' + s.id + '" aria-label="Plus d’options">⋯</button></div></div>';
+    const passItem = s => '<div class="item" style="cursor:default;padding:10px 12px 10px 16px"><div><div class="t" style="font-size:15px">' + esc(dateFr(s.start)) + ((S.absences || []).some(a => a.patientId === s.patientId && a.date === s.start) ? ' <span class="pill warn" style="font-size:11px">absent</span>' : '') + '</div><div class="s">' + esc(actsText(s.acts)) + '</div></div>' +
+      '<div style="display:flex;gap:6px;align-items:center"><button class="chip" data-redo="' + s.id + '" style="min-height:40px;padding:0 12px;font-size:14px">Refaire</button><button class="icon-btn" data-soin-menu="' + s.id + '" aria-label="Plus d’options">⋯</button></div></div>';
     h += '<div class="btns"><a class="btn" href="#ajout?patient=' + id + '">+ Ajouter un passage</a></div>';
     h += '<div class="section">Derniers passages</div>';
     h += passes.length ? '<div class="list">' + passes.slice(0, UI.allPass ? 999 : 6).map(passItem).join('') + '</div>' + (passes.length > 6 ? '<button class="back" id="pt-all" style="margin:0 4px 8px">' + (UI.allPass ? 'Voir moins' : 'Voir les ' + passes.length + ' passages') + '</button>' : '') : '<p class="note">Aucun passage noté pour l’instant.</p>';
@@ -489,7 +493,7 @@
       '<div style="display:flex;gap:6px"><a class="icon-btn" style="display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:15px" href="#ajout?soin=' + s.id + '" aria-label="Modifier ce soin">✎</a><button class="icon-btn" data-soin-menu="' + s.id + '" aria-label="Plus d’options">⋯</button></div></div>';
     if (actifs.length) h += '<div class="list">' + actifs.map(soinItem).join('') + '</div>';
     h += '<div class="section">Cotation d’un jour</div><input class="in" type="date" id="pt-date" value="' + UI.patientDate + '">';
-    h += cotationBox(E.coteJour(p, S.soins, UI.patientDate, { tarifs: S.tarifs, regles: S.regles }), dateFr(UI.patientDate));
+    h += cotationBox(E.coteJour(p, S.soins, UI.patientDate, copts()), dateFr(UI.patientDate));
     h += '<div class="card rowx" style="margin-top:12px;background:var(--ink);color:#fff"><div><div style="font-size:13px;opacity:.85">Facturé en ' + monthLabel(UI.month) + '</div><div style="font-size:13px;opacity:.85">ta part : ' + eur((d.byPat[id] || 0) * (1 - ((c && c.retro) || 0) / 100)) + '</div></div><b style="font-size:22px">' + eur(d.byPat[id] || 0) + '</b></div>';
     if (finis.length) h += '<div class="section">Soins répétés terminés</div><div class="list">' + finis.map(soinItem).join('') + '</div>';
     app.innerHTML = h;
@@ -505,12 +509,26 @@
       '<div class="btns"><button class="btn ghost" data-close>Plus tard</button><a class="btn accent" id="mp-go" href="' + mapsUrl(p) + '" target="_blank" rel="noopener">Ouvrir Maps</a></div>', (m, close) => { $('#mp-go', m).addEventListener('click', () => setTimeout(close, 300)); });
   }
   function redoToday(sid) {
-    const s = S.soins.find(x => x.id === sid); const t = today();
-    const sig = x => JSON.stringify((x.acts || []).map(a => [a.id, a.qty, a.coef || 0]));
-    if (S.soins.some(x => x.patientId === s.patientId && (x.rec || {}).type === 'once' && x.start === t && x.heure === s.heure && sig(x) === sig(s)))
-      return toast('Déjà noté aujourd’hui à ' + s.heure.replace(':', ' h '));
-    S.soins.push({ id: uid(), patientId: s.patientId, heure: s.heure, acts: JSON.parse(JSON.stringify(s.acts)), rec: { type: 'once' }, start: t, end: '', dimanche: E.isDimancheOuFerie(t), nuit: false });
-    save(); toast('Passage noté pour aujourd’hui'); route();
+    const s = S.soins.find(x => x.id === sid);
+    const t = today(), demain = E.addDays(t, 1), hier = E.addDays(t, -1);
+    let def = E.addDays(s.start, 1); if (def > demain) def = demain;
+    const chip = (d, l) => '<button class="chip' + (d === def ? ' on' : '') + '" data-d="' + d + '" style="min-height:44px">' + l + '</button>';
+    sheet('<h2>Refaire ce soin</h2><p class="note">' + esc(actsText(s.acts)) + '</p><label class="f">Pour quel jour ?</label>' +
+      '<div class="chips" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr))">' + chip(hier, 'Hier') + chip(t, 'Aujourd’hui') + chip(demain, 'Demain') + '</div>' +
+      '<label class="f" for="rd-date">Ou une autre date</label><input class="in" type="date" id="rd-date" value="' + def + '">' +
+      '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="rd-ok">Noter le ' + esc(dateFr(def)) + '</button></div>',
+      (m, close) => {
+        const set = d => { $('#rd-date', m).value = d; $$('[data-d]', m).forEach(b => b.classList.toggle('on', b.dataset.d === d)); $('#rd-ok', m).textContent = 'Noter le ' + dateFr(d); };
+        $$('[data-d]', m).forEach(b => b.onclick = () => set(b.dataset.d));
+        $('#rd-date', m).onchange = e => e.target.value && set(e.target.value);
+        $('#rd-ok', m).onclick = () => {
+          const d = $('#rd-date', m).value || def;
+          const sig = x => JSON.stringify((x.acts || []).map(a => [a.id, a.qty, a.coef || 0]));
+          if (S.soins.some(x => x.patientId === s.patientId && (x.rec || {}).type === 'once' && x.start === d && sig(x) === sig(s))) { toast('Déjà noté le ' + dateFr(d)); return; }
+          S.soins.push({ id: uid(), patientId: s.patientId, heure: s.heure, acts: JSON.parse(JSON.stringify(s.acts)), rec: { type: 'once' }, start: d, end: '', dimanche: E.isDimancheOuFerie(d), nuit: false });
+          save(); close(); toast('Noté pour le ' + dateFr(d)); route();
+        };
+      });
   }
   function soinMenu(sid) {
     const s = S.soins.find(x => x.id === sid);
@@ -541,11 +559,11 @@
       patientId: p0 ? p0.id : null, patientName: p0 ? p0.nom : '',
       newP: { bsi: '', diab: false, cancer: false, palliatif: false, enfant7: false, km: 0, adresse: '', code: '', etage: '', porte: '', tel: '', noteSoin: '' },
       texte: (q.note && p0 && p0.noteSoin) ? p0.noteSoin : '', acts: base ? JSON.parse(JSON.stringify(base.acts)) : [], unknown: [],
-      heure: base ? base.heure : (UI.lastHeure || '08:00'),
+      heure: base ? base.heure : nowHM(),
       rec: existing ? JSON.parse(JSON.stringify(existing.rec)) : { type: 'once', days: [1, 2, 3, 4, 5] },
       start, end: existing ? (existing.end || '') : '',
       dimanche: existing ? !!existing.dimanche : E.isDimancheOuFerie(start),
-      showDetail: false
+      showDetail: false, back: q.back || ''
     };
     if (UI.draft.texte) { const r = parseLocal(UI.draft.texte); mergeActs(r.acts); UI.draft.unknown = r.unknown; }
     drawAjout();
@@ -585,7 +603,7 @@
       h += '<label class="chk sm"><span>Majoration ' + (E.parseIso(D.start).getDay() === 0 ? 'dimanche' : 'jour férié') + ' (+' + eur(S.tarifs.dimanche) + ')</span><input type="checkbox" id="a-dim"' + (D.dimanche ? ' checked' : '') + '></label>';
     }
     h += '<div id="a-cot"></div>';
-    h += '<div class="savebar"><button class="btn" id="a-save">Enregistrer</button></div>';
+    h += '<div class="savebar"><div style="display:flex;gap:10px;max-width:528px;margin:0 auto">' + (D.id ? '' : '<button class="btn ghost" id="a-abs" style="flex:0 0 108px">Absent</button>') + '<button class="btn" id="a-save" style="flex:1">Enregistrer</button></div></div>';
     app.innerHTML = h;
     bindAjout(); drawSugg(); drawPreview();
   }
@@ -625,6 +643,15 @@
     $('#a-start').onchange = () => { syncDraft(); if (D.rec.type === 'once') { D.dimanche = E.isDimancheOuFerie(D.start); drawAjout(); } else drawPreview(); };
     ['#a-h', '#a-dim', '#a-end'].forEach(s => { const el = $(s); if (el) el.onchange = () => { syncDraft(); drawPreview(); }; });
     $('#a-save').onclick = saveSoin;
+    const ab = $('#a-abs'); if (ab) ab.onclick = () => {
+      syncDraft();
+      if (!D.patientName.trim()) return toast('Indique d’abord le patient');
+      absentSheet(D.patientName.trim(), facture => {
+        const pid = ensureDraftPatient();
+        setAbsence(pid, D.start, facture);
+        if (facture && D.acts.length) saveSoin(true); else afterSave(pid, D.start, facture ? 'Absent noté (facturé)' : 'Absent noté (non facturé)');
+      });
+    };
   }
   function mergeActs(list) {
     const D = UI.draft;
@@ -696,7 +723,7 @@
     const others = S.soins.filter(s => s.patientId === p.id && s.id !== D.id);
     // premier jour où le soin a lieu
     let day = tmp.start; for (let i = 0; i < 14 && !E.occursOn(tmp, day); i++) day = E.addDays(day, 1);
-    const pass = E.coteJour(p, others.concat([tmp]), day, { tarifs: S.tarifs, regles: S.regles }).filter(ps => ps.heure === tmp.heure);
+    const pass = E.coteJour(p, others.concat([tmp]), day, copts()).filter(ps => ps.heure === tmp.heure);
     const withOthers = others.some(s => E.occursOn(s, day) && (s.heure || '08:00') === tmp.heure);
     const lines = pass.flatMap(ps => ps.lines).filter(l => l.montant > 0);
     const summary = lines.map(l => l.label.replace(/^1 /, '').replace(/ 1 Entier$| Entier$/, '').replace(/ Demi$/, '/2').replace(/ \(\d+ % du forfait\)/, '').replace(/^Majoration dimanche\/férié$/, 'Dim.')).join(' + ');
@@ -708,27 +735,47 @@
     box.innerHTML = html;
     const cl = $('#a-cotline'); if (cl) cl.onclick = () => { D.showDetail = !D.showDetail; drawPreview(); };
   }
-  function saveSoin() {
-    syncDraft();
+  function ensureDraftPatient() {
+    const D = UI.draft;
+    if (D.patientId) return D.patientId;
+    const np = Object.assign({ id: uid(), nom: D.patientName.trim(), cabinetId: D.cabinetId }, D.newP);
+    S.patients.push(np); D.patientId = np.id; if (np.adresse) UI.mapsPrompt = np.id;
+    return np.id;
+  }
+  function absentSheet(nom, cb) {
+    sheet('<h2>' + esc(nom) + ' absent</h2><p class="note">C’est la titulaire qui décide. Ton choix ne sert qu’à estimer tes revenus, il n’apparaît pas dans le bilan.</p>' +
+      '<div class="btns"><button class="btn ghost" id="ab-non">Sans facturation</button><button class="btn accent" id="ab-oui">Avec facturation</button></div><button class="btn" data-close>Annuler</button>',
+      (m, close) => { $('#ab-oui', m).onclick = () => { close(); cb(true); }; $('#ab-non', m).onclick = () => { close(); cb(false); }; });
+  }
+  function setAbsence(pid, date, facture) {
+    S.absences = (S.absences || []).filter(a => !(a.patientId === pid && a.date === date));
+    S.absences.push({ id: uid(), patientId: pid, date, facture: !!facture });
+    save();
+  }
+  function afterSave(pid, date, msg) {
+    const D = UI.draft; const p = pat(pid);
+    UI.lastCab = D.cabinetId; save();
+    if (D.back === 'tournee') { UI.soinsVue = 'jour'; UI.soinsDate = date; toast(msg); location.hash = '#soins'; return; }
+    toast(msg + ' — patient suivant ?');
+    viewAjout({ date, cabinet: D.cabinetId });
+    if (UI.mapsPrompt === pid && p && p.adresse) { UI.mapsPrompt = null; mapsSheet(p); }
+  }
+  function saveSoin(fromAbsent) {
+    if (fromAbsent !== true) syncDraft();
     const D = UI.draft;
     if (!D.acts.length) return toast('Ajoute au moins un acte');
     if (!D.patientName.trim()) return toast('Indique le patient');
     if (D.rec.type === 'weekdays' && !(D.rec.days || []).length) return toast('Choisis au moins un jour');
     if (D.end && D.end < D.start) return toast('La date de fin est avant le début');
-    let pid = D.patientId;
-    if (!pid) { const np = Object.assign({ id: uid(), nom: D.patientName.trim(), cabinetId: D.cabinetId }, D.newP); S.patients.push(np); pid = np.id; if (np.adresse) UI.mapsPrompt = pid; }
+    const pid = ensureDraftPatient();
     const lvAct = D.acts.map(a => E.ACTS[a.id] && E.ACTS[a.id].niveau).filter(Boolean).sort().pop();
     if (lvAct && !pat(pid).bsi) pat(pid).bsi = lvAct;
-    const data = { patientId: pid, heure: D.heure || '08:00', acts: D.acts, rec: D.rec, start: D.start || today(), end: D.rec.type === 'once' ? '' : (D.end || ''), dimanche: D.dimanche, nuit: false };
-    if (D.id) Object.assign(S.soins.find(s => s.id === D.id), data); else S.soins.push(Object.assign({ id: uid() }, data));
-    UI.lastCab = D.cabinetId; UI.lastHeure = D.heure;
-    save();
-    const p = pat(pid);
-    if (D.id) { toast('Soin modifié'); location.hash = '#patient/' + pid; return; }
-    toast('Enregistré pour ' + p.nom + ' — patient suivant ?');
-    viewAjout({ date: data.start, cabinet: D.cabinetId });
-    if (UI.mapsPrompt === pid && p.adresse) { UI.mapsPrompt = null; mapsSheet(p); }
+    const data = { patientId: pid, heure: D.heure || nowHM(), acts: D.acts, rec: D.rec, start: D.start || today(), end: D.rec.type === 'once' ? '' : (D.end || ''), dimanche: D.dimanche, nuit: false };
+    if (D.id) { Object.assign(S.soins.find(s => s.id === D.id), data); save(); toast('Soin modifié'); location.hash = '#patient/' + pid; return; }
+    S.soins.push(Object.assign({ id: uid() }, data));
+    afterSave(pid, data.start, fromAbsent === true ? 'Absent noté (facturé)' : 'Enregistré pour ' + pat(pid).nom);
   }
+
 
   // ----- Détail du mois (PDF) -----
   function viewDetail(q) {
@@ -761,6 +808,161 @@
     app.innerHTML = h; bindMonthNav();
     $('#dt-cab').onchange = e => { location.hash = '#detail' + (e.target.value ? '?cabinet=' + e.target.value : ''); };
     $('#dt-print').onclick = () => window.print();
+  }
+
+  // ----- Mes soins : tournée du jour, revenus par soin, bilan -----
+  function nomNote(p) {
+    if (p.nomNote) return p.nomNote;
+    let w = String(p.nom || '').replace(/^(m\.|mr\.?|mme\.?|mlle\.?|monsieur|madame|mademoiselle)\s+/i, '').trim().split(/\s+/).filter(Boolean);
+    const caps = w.filter(x => x.length > 1 && x === x.toUpperCase() && /[A-ZÀ-Ý]/.test(x));
+    const nom = caps.length ? caps.join(' ') : (w[w.length - 1] || p.nom || '');
+    return nom === nom.toUpperCase() ? nom.toLowerCase().replace(/(^|[\s-])\S/g, c => c.toUpperCase()) : nom;
+  }
+  function statut(pid, date) {
+    const absent = (S.absences || []).find(a => a.patientId === pid && a.date === date);
+    const notes = S.soins.filter(s => s.patientId === pid && (s.rec || {}).type === 'once' && s.start === date && (s.acts || []).length);
+    const fait = (S.faits || []).some(f => f.patientId === pid && f.date === date);
+    const prevu = S.soins.some(s => s.patientId === pid && (s.rec || {}).type !== 'once' && E.occursOn(s, date));
+    return { absent, notes, fait, prevu, done: notes.length > 0 || fait };
+  }
+  function periodDays() {
+    const d = UI.soinsDate;
+    if (UI.soinsVue === 'jour') return [d];
+    if (UI.soinsVue === 'mois') return E.monthDays(d.slice(0, 7));
+    const wd = (E.parseIso(d).getDay() + 6) % 7; const mon = E.addDays(d, -wd);
+    return [0, 1, 2, 3, 4, 5, 6].map(i => E.addDays(mon, i));
+  }
+  function periodLabel(days) {
+    if (UI.soinsVue === 'jour') { const t = dateFr(days[0]); return t.charAt(0).toUpperCase() + t.slice(1); }
+    if (UI.soinsVue === 'mois') { const t = monthLabel(days[0].slice(0, 7)); return t.charAt(0).toUpperCase() + t.slice(1); }
+    return 'Du ' + dateCourt(days[0]).slice(0, 5) + ' au ' + dateCourt(days[6]).slice(0, 5);
+  }
+  const MAJ = { IFD: 'Déplacements (IFD)', IFI: 'Déplacements BSI (IFI)', IK: 'Indemnités kilométriques', MCI: 'MCI', MAU: 'MAU', DIM: 'Majoration dimanche / férié', MIE: 'MIE', NUIT: 'Majoration de nuit' };
+  function viewSoins() {
+    const days = periodDays();
+    const passages = E.coteJours(S, days);
+    const retro = pid => { const p = pat(pid); const c = p && cab(p.cabinetId); return ((c && c.retro) || 0) / 100; };
+    let fact = 0, part = 0; const actes = {}, majs = {}, forf = {};
+    passages.forEach(ps => {
+      fact += ps.total; part += ps.total * (1 - retro(ps.patientId));
+      ps.lines.forEach(l => {
+        if (!(l.montant > 0)) return;
+        if (MAJ[l.code]) { const k = MAJ[l.code]; (majs[k] = majs[k] || { n: 0, m: 0 }); majs[k].n++; majs[k].m += l.montant; }
+        else if (/^BS[ABC]$/.test(l.code)) { const k = 'Forfait ' + l.code; (forf[k] = forf[k] || { set: new Set(), m: 0 }); forf[k].set.add(ps.patientId + ps.date); forf[k].m += l.montant; }
+        else { const k = l.detail || l.label; (actes[k] = actes[k] || { n: 0, m: 0 }); actes[k].n++; actes[k].m += l.montant; }
+      });
+    });
+    let h = brandTop('Mes soins');
+    h += '<div class="chips noprint" style="margin-bottom:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))">' + [['jour', 'Jour'], ['semaine', 'Semaine'], ['mois', 'Mois']].map(([k, l]) => '<button class="chip' + (UI.soinsVue === k ? ' on' : '') + '" data-vue="' + k + '" aria-pressed="' + (UI.soinsVue === k) + '">' + l + '</button>').join('') + '</div>';
+    h += '<div class="rowx" style="margin-bottom:12px"><button class="icon-btn" id="s-prev" aria-label="Période précédente" style="background:#fff">‹</button><button class="back" id="s-date" style="font-size:17px;color:var(--ink)">' + esc(periodLabel(days)) + '</button><button class="icon-btn" id="s-next" aria-label="Période suivante" style="background:#fff">›</button></div>';
+    h += '<input type="date" id="s-pick" value="' + UI.soinsDate + '" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px" tabindex="-1" aria-hidden="true">';
+    // tournée du jour
+    if (UI.soinsVue === 'jour') {
+      const d = UI.soinsDate; const ordre = (S.tournees || {})[d] || [];
+      h += '<div class="section" style="margin-top:4px">Tournée du jour</div>';
+      if (!ordre.length) h += '<button class="btn accent" id="t-create">Créer la tournée du jour</button>';
+      else {
+        h += '<div class="list">';
+        ordre.forEach((pid, i) => {
+          const p = pat(pid); if (!p) return;
+          const st = statut(pid, d);
+          const pill = st.absent ? '<span class="pill warn">❌ absent' + (st.absent.facture ? ' · facturé' : '') + '</span>' : st.done ? '<span class="pill ok">✅ fait</span>' : st.prevu ? '<span class="pill info">prévu</span>' : '<span class="pill" style="background:#EEF1F4;color:var(--muted)">à faire</span>';
+          h += '<div class="item" style="display:block;cursor:default;padding:10px 12px 10px 14px"><div class="rowx" style="align-items:flex-start"><a href="#patient/' + pid + '" style="text-decoration:none;color:inherit;flex:1;min-width:0"><div class="t"><span style="color:var(--accent)">' + (i + 1) + '.</span> ' + esc(p.nom) + '</div>' +
+            '<div class="s">' + esc([p.adresse, p.code ? 'code ' + p.code : '', p.etage ? 'ét. ' + p.etage : ''].filter(Boolean).join(' · ')) + '</div>' +
+            (st.notes.length ? '<div class="s" style="color:var(--ink)">' + esc(st.notes.map(s => actsText(s.acts)).join(' · ')) + '</div>' : '') + '</a>' + pill + '</div>' +
+            '<div style="display:flex;gap:8px;margin-top:8px">' +
+            '<a class="chip" style="display:inline-flex;align-items:center;text-decoration:none;min-height:40px;font-size:14px" href="#ajout?patient=' + pid + '&date=' + d + '&back=tournee">+ Soins</a>' +
+            (st.prevu && !st.done && !st.absent ? '<button class="chip" data-fait="' + pid + '" style="min-height:40px;font-size:14px">Fait</button>' : '') +
+            (st.absent ? '<button class="chip" data-unabs="' + pid + '" style="min-height:40px;font-size:14px">Annuler l’absence</button>' : '<button class="chip" data-abs="' + pid + '" style="min-height:40px;font-size:14px">Absent</button>') +
+            '</div></div>';
+        });
+        h += '</div><div class="btns"><button class="btn ghost" id="t-edit">Modifier la tournée</button><button class="btn accent" id="t-bilan">Bilan pour la note</button></div>';
+      }
+    }
+    // totaux
+    h += '<div class="hero" style="margin-top:14px;padding:16px 18px"><div class="lbl">Ta part ' + (UI.soinsVue === 'jour' ? 'du jour' : UI.soinsVue === 'semaine' ? 'de la semaine' : 'du mois') + '</div><div class="big" style="font-size:34px">' + eur(part) + '</div><div class="sub">' + eur(fact) + ' facturés · ' + passages.length + ' passage' + (passages.length > 1 ? 's' : '') + '</div></div>';
+    // revenu par soin
+    const rows = (obj, cnt) => Object.entries(obj).sort((a, b) => b[1].m - a[1].m).map(([k, v]) => '<div class="line" style="padding:8px 0;border-bottom:1px solid var(--line)"><span>' + esc(k) + ' <span class="note">× ' + cnt(v) + '</span></span><b>' + eur(v.m) + '</b></div>').join('');
+    if (passages.length) {
+      h += '<div class="section">Revenu par soin (facturé)</div><div class="card" style="padding:6px 16px">' + rows(forf, v => v.set.size) + rows(actes, v => v.n) + '</div>';
+      if (Object.keys(majs).length) h += '<div class="section">Déplacements et majorations</div><div class="card" style="padding:6px 16px">' + rows(majs, v => v.n) + '</div>';
+      h += '<div class="section">Passages</div><div class="list">';
+      passages.slice().sort((a, b) => a.date.localeCompare(b.date) || a.heure.localeCompare(b.heure)).forEach(ps => {
+        const p = pat(ps.patientId);
+        h += '<a class="item" href="#patient/' + ps.patientId + '"><div><div class="t">' + (UI.soinsVue !== 'jour' ? esc(dateCourt(ps.date).slice(0, 5)) + ' · ' : '') + esc(p ? p.nom : '?') + (ps.absent ? ' <span class="pill warn" style="font-size:11px">absent</span>' : '') + '</div><div class="s">' + esc(ps.lines.filter(l => l.montant > 0 && !MAJ[l.code]).map(l => l.detail || l.label).join(' · ')) + '</div></div><span class="v">' + eur(ps.total) + '</span></a>';
+      });
+      h += '</div>';
+    } else h += '<p class="note">Aucun soin noté sur cette période.</p>';
+    h += '<div class="btns"><a class="btn" href="#ajout?date=' + UI.soinsDate + '">+ Noter un passage</a></div>';
+    app.innerHTML = h;
+    $$('[data-vue]').forEach(b => b.onclick = () => { UI.soinsVue = b.dataset.vue; route(); });
+    const step = n => { UI.soinsDate = UI.soinsVue === 'mois' ? shiftMonth(UI.soinsDate.slice(0, 7), n) + '-01' : E.addDays(UI.soinsDate, n * (UI.soinsVue === 'semaine' ? 7 : 1)); route(); };
+    $('#s-prev').onclick = () => step(-1); $('#s-next').onclick = () => step(1);
+    $('#s-date').onclick = () => { const pk = $('#s-pick'); if (pk.showPicker) { try { pk.showPicker(); return; } catch (e) {} } UI.soinsDate = today(); route(); };
+    $('#s-pick').onchange = e => { if (e.target.value) { UI.soinsDate = e.target.value; route(); } };
+    const tc = $('#t-create'); if (tc) tc.onclick = () => editTournee(UI.soinsDate);
+    const te = $('#t-edit'); if (te) te.onclick = () => editTournee(UI.soinsDate);
+    const tb = $('#t-bilan'); if (tb) tb.onclick = () => bilanSheet(UI.soinsDate);
+    $$('[data-fait]').forEach(b => b.onclick = () => { S.faits = (S.faits || []).concat({ patientId: b.dataset.fait, date: UI.soinsDate }); save(); route(); });
+    $$('[data-abs]').forEach(b => b.onclick = () => absentSheet(pat(b.dataset.abs).nom, f => { setAbsence(b.dataset.abs, UI.soinsDate, f); toast('Absent noté'); route(); }));
+    $$('[data-unabs]').forEach(b => b.onclick = () => { S.absences = S.absences.filter(a => !(a.patientId === b.dataset.unabs && a.date === UI.soinsDate)); save(); route(); });
+  }
+  function editTournee(date) {
+    let ordre = ((S.tournees || {})[date] || []).filter(id => pat(id));
+    let q = '';
+    const m = document.createElement('div'); m.className = 'modal';
+    m.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" style="max-height:92vh"></div>';
+    document.body.appendChild(m);
+    const sh = $('.sheet', m);
+    const close = () => m.remove();
+    const draw = () => {
+      let h = '<h2>Tournée du ' + esc(dateFr(date)) + '</h2><p class="note">Touche les patients dans l’ordre où tu vas les voir.</p>';
+      h += '<div class="section">Ordre de passage (' + ordre.length + ')</div>';
+      h += ordre.length ? '<div class="list">' + ordre.map((id, i) => '<div class="item" style="cursor:default;padding:6px 6px 6px 14px;min-height:48px"><span style="flex:1"><b style="color:var(--accent)">' + (i + 1) + '.</b> ' + esc(pat(id).nom) + '</span><span style="display:flex;gap:4px"><button class="icon-btn" data-up="' + i + '" aria-label="Monter"' + (i ? '' : ' disabled') + '>↑</button><button class="icon-btn" data-down="' + i + '" aria-label="Descendre"' + (i < ordre.length - 1 ? '' : ' disabled') + '>↓</button><button class="icon-btn" data-rm="' + i + '" aria-label="Retirer">✕</button></span></div>').join('') + '</div>' : '<p class="note">Aucun patient pour l’instant.</p>';
+      h += '<div class="section">Ajouter des patients</div><input class="in" id="tq" placeholder="Rechercher" autocomplete="off" value="' + esc(q) + '" style="margin-bottom:8px">';
+      S.cabinets.forEach(c => {
+        const pts = S.patients.filter(p => p.cabinetId === c.id && !ordre.includes(p.id) && (!q || norm(p.nom).includes(norm(q)) || norm(p.adresse).includes(norm(q)))).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+        if (!pts.length) return;
+        h += '<div class="note" style="font-weight:700;margin:10px 4px 6px">' + esc(c.nom) + '</div><div class="list">' + pts.map(p => '<button class="item" data-add="' + p.id + '" style="min-height:48px;padding:8px 14px"><span><span class="t" style="font-weight:600">' + esc(p.nom) + '</span>' + (statut(p.id, date).prevu ? ' <span class="pill info" style="font-size:11px">prévu</span>' : '') + '</span><span style="font-size:22px;color:var(--accent)">+</span></button>').join('') + '</div>';
+      });
+      h += '<div class="btns" style="position:sticky;bottom:0;background:var(--bg);padding-top:8px;margin-bottom:0"><button class="btn ghost" id="t-cancel">Annuler</button><button class="btn accent" id="t-ok">Valider</button></div>';
+      sh.innerHTML = h;
+      $$('[data-add]', sh).forEach(b => b.onclick = () => { ordre.push(b.dataset.add); const st = sh.scrollTop; draw(); sh.scrollTop = st; });
+      $$('[data-rm]', sh).forEach(b => b.onclick = () => { ordre.splice(+b.dataset.rm, 1); draw(); });
+      $$('[data-up]', sh).forEach(b => b.onclick = () => { const i = +b.dataset.up; [ordre[i - 1], ordre[i]] = [ordre[i], ordre[i - 1]]; draw(); });
+      $$('[data-down]', sh).forEach(b => b.onclick = () => { const i = +b.dataset.down; [ordre[i + 1], ordre[i]] = [ordre[i], ordre[i + 1]]; draw(); });
+      const tq = $('#tq', sh); tq.oninput = () => { q = tq.value; const pos = tq.selectionStart; draw(); const n = $('#tq', sh); n.focus(); n.setSelectionRange(pos, pos); };
+      $('#t-cancel', sh).onclick = close;
+      $('#t-ok', sh).onclick = () => { S.tournees = S.tournees || {}; if (ordre.length) S.tournees[date] = ordre; else delete S.tournees[date]; save(); close(); route(); };
+    };
+    draw();
+  }
+  function bilanText(date) {
+    let ordre = ((S.tournees || {})[date] || []).filter(id => pat(id));
+    // patients vus ou absents ce jour-là sans être dans la tournée : ajoutés à la fin
+    S.patients.forEach(p => { const st = statut(p.id, date); if ((st.done || st.absent) && !ordre.includes(p.id)) ordre.push(p.id); });
+    const groups = [];
+    ordre.forEach(id => { const p = pat(id); let g = groups.find(x => x.cab === p.cabinetId); if (!g) groups.push(g = { cab: p.cabinetId, ids: [] }); g.ids.push(id); });
+    const dd = date.slice(8, 10) + '/' + date.slice(5, 7);
+    let pending = 0;
+    const txt = groups.map(g => {
+      const c = cab(g.cab); const titre = (c ? c.nom : '').replace(/^cabinet\s+/i, '');
+      return titre + ' ' + dd + '\n\n' + g.ids.map(id => { const st = statut(id, date); if (!st.absent && !st.done) pending++; return nomNote(pat(id)) + ' : ' + (st.absent ? '❌' : st.done ? '✅' : ''); }).join('\n');
+    }).join('\n\n\n');
+    return { txt, pending };
+  }
+  function bilanSheet(date) {
+    const { txt, pending } = bilanText(date);
+    sheet('<h2>Bilan pour la note</h2>' + (pending ? '<div class="unknown">' + pending + ' patient(s) sans statut : leur ligne reste vide.</div>' : '') +
+      '<textarea class="in" id="bl-txt" style="min-height:240px;font-size:16px;line-height:1.5" readonly>' + esc(txt) + '</textarea>' +
+      '<div class="btns"><button class="btn ghost" id="bl-share">Partager</button><button class="btn accent" id="bl-copy">Copier</button></div><button class="btn" data-close>Fermer</button>',
+      (m, close) => {
+        $('#bl-copy', m).onclick = async () => {
+          try { await navigator.clipboard.writeText(txt); toast('Copié : colle-le dans la note'); close(); }
+          catch (e) { const t = $('#bl-txt', m); t.removeAttribute('readonly'); t.select(); document.execCommand('copy'); toast('Copié'); }
+        };
+        $('#bl-share', m).onclick = async () => { if (navigator.share) { try { await navigator.share({ text: txt }); } catch (e) {} } else toast('Partage indisponible ici, utilise Copier'); };
+      });
   }
 
   // ----- Réglages -----
