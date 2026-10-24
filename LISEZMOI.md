@@ -27,7 +27,11 @@ Soeuringue est une appli web installable. Tu la mets en ligne une fois (gratuit)
 ## 4. Premiers pas
 
 - **Créer les cabinets** : un par titulaire, avec la rétrocession (10 % par défaut).
-- **+ Ajouter un soin** : elle tape ou dicte avec le micro du clavier (« pansement d'escarre + insuline + glycémie »), appuie sur **Reconnaître**, vérifie les actes, choisit le patient dans la liste, la fréquence, puis **Enregistrer**. Ça marche sans réseau.
+- **+ Noter un passage** : elle choisit le patient, tape ou dicte les soins avec le micro du clavier (« pansement d'escarre + insuline + glycémie »), appuie sur **Reconnaître**, vérifie les actes et la date, puis **Enregistrer**. Le passage compte pour ce jour-là seulement. Le formulaire se vide ensuite pour le patient suivant. Ça marche sans réseau.
+- **Refaire aujourd'hui** : sur la fiche d'un patient, ce bouton recopie un passage à la date du jour en une touche.
+- **Répéter** (facultatif) : pour un remplacement long, un soin peut être répété tous les jours, tous les 2 jours ou certains jours.
+- **Patients** : choisis un cabinet pour voir ses patients, avec **+ Nouveau patient** en haut. La recherche de la première page cherche dans tous les cabinets.
+- **Cabinets** : nom et téléphone de la titulaire (bouton Appeler), montants du mois et virements.
 - **Noter un virement reçu** dans chaque cabinet. L'accueil affiche alors ce qui manque.
 - **Détail du mois (PDF)** : bouton **Exporter en PDF**, puis dans la fenêtre d'impression, **Partager** pour l'enregistrer en PDF.
 
@@ -41,7 +45,7 @@ Dans **Réglages**, puis **Sauvegarder** : ça crée un fichier chiffré par un 
 
 ## 7. Mise à jour de l'appli
 
-Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.2.1` devient `v1.2.2`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
+Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.4.0` devient `v1.4.1`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
 
 ---
 Les montants sont des **estimations** calculées selon la NGAP (avenant 11), la brochure Idelstory et le guide CBA. Les tarifs et les règles sont modifiables dans Réglages. Pour un cas particulier, il y a **Ajouter un acte à la main**, puis **Acte manuel**.

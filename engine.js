@@ -37,9 +37,9 @@
   // lourd : déclenche la MCI ; derogBsi : facturable en AMX un jour de BSI
   // diab : fait partie de la « parenthèse du diabétique »
   const ACTS = {
-    bsa_f:           { l: 'Forfait BSA (dépendance légère)', c: 0, dependance: true, niveau: 'BSA', g: 'BSI' },
-    bsb_f:           { l: 'Forfait BSB (dépendance intermédiaire)', c: 0, dependance: true, niveau: 'BSB', g: 'BSI' },
-    bsc_f:           { l: 'Forfait BSC (dépendance lourde)', c: 0, dependance: true, niveau: 'BSC', g: 'BSI' },
+    bsa_f:           { l: 'Forfait BSA', c: 0, dependance: true, niveau: 'BSA', g: 'BSI' },
+    bsb_f:           { l: 'Forfait BSB', c: 0, dependance: true, niveau: 'BSB', g: 'BSI' },
+    bsc_f:           { l: 'Forfait BSC', c: 0, dependance: true, niveau: 'BSC', g: 'BSI' },
     dependance:      { l: 'Soins de dépendance (niveau de la fiche)', c: 0, dependance: true, g: 'BSI' },
     bsi_initial:     { l: 'Bilan BSI initial (DI 2,5)', c: 2.5, di: true, g: 'BSI' },
     bsi_renouv:      { l: 'Bilan BSI renouvellement (DI 1,2)', c: 1.2, di: true, g: 'BSI' },
