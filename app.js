@@ -17,7 +17,7 @@
   function blank() {
     return { v: 1, cabinets: [], patients: [], soins: [], virements: [],
       tarifs: JSON.parse(JSON.stringify(E.DEFAULT_TARIFS)), regles: Object.assign({}, E.DEFAULT_REGLES),
-      apiKey: '', aiModel: 'claude-haiku-5-5', tournees: {}, absences: [], faits: [] };
+      apiKey: '', aiModel: 'claude-haiku-5-5', tournees: {}, absences: [], faits: [], transmissions: {} };
   }
   function load() {
     try {
@@ -210,8 +210,9 @@
       case 'patient': setTab('patients'); return viewPatient(parts[1]);
       case 'ajout': setTab(''); document.body.classList.add('noTabs'); return viewAjout(q);
       case 'soins': setTab('soins'); return viewSoins();
-      case 'reglages': setTab('reglages'); return viewReglages();
-      case 'tarifs': setTab('reglages'); return viewTarifs();
+      case 'transmissions': setTab('transmissions'); return viewTransmissions();
+      case 'reglages': setTab('mois'); return viewReglages();
+      case 'tarifs': setTab('mois'); return viewTarifs();
       case 'detail': setTab('mois'); return viewDetail(q);
       default: setTab('mois'); return viewMois();
     }
@@ -238,7 +239,7 @@
     }
     const d = monthData(UI.month);
     const ecart = d.tot.recu - d.tot.part;
-    let h = installBanner() + brandTop('Soeuringue') + monthNav();
+    let h = installBanner() + brandTop('Soeuringue', '<a class="icon-btn" href="#reglages" aria-label="Réglages" style="display:flex;align-items:center;justify-content:center;background:#fff;text-decoration:none;color:var(--ink)"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>') + monthNav();
     h += '<div class="hero"><div class="lbl">Ce que tu devrais toucher</div><div class="big">' + eur0(d.tot.part) + '</div>' +
       '<div class="sub">' + eur(d.tot.facture) + ' facturés par les titulaires · rétrocession déduite</div>' +
       '<div class="row soft"><span>Reçu des titulaires</span><span>' + eur(d.tot.recu) + '</span></div>' +
@@ -475,6 +476,7 @@
     let h = '<div class="top" style="margin-bottom:4px;min-height:40px"><a class="back" href="#patients/' + p.cabinetId + '">‹ ' + esc(c ? c.nom : 'Patients') + '</a><button class="back" id="pt-edit">Modifier</button></div>';
     h += '<h1 style="font-size:24px;margin:0;line-height:1.2">' + esc(p.nom) + '</h1>';
     const bd = badges(p); if (bd !== 'Patient') h += '<p class="note" style="margin:2px 0 0;font-size:13px">' + bd + '</p>';
+    h += trLines(id, today()).replace(/class="tr /g, 'style="margin-top:6px" class="tr ');
     if (p.adresse || p.code || p.etage || p.porte || p.tel) {
       const tag = (l, v) => v ? '<span class="pill info" style="font-size:13px;padding:5px 10px">' + l + ' <b>' + esc(v) + '</b></span>' : '';
       h += '<div class="card" style="padding:12px 14px;margin-top:10px">';
@@ -841,8 +843,8 @@
     const d = UI.soinsDate;
     if (UI.soinsVue === 'jour') return [d];
     if (UI.soinsVue === 'mois') return E.monthDays(d.slice(0, 7));
-    const wd = (E.parseIso(d).getDay() + 6) % 7; const mon = E.addDays(d, -wd);
-    return [0, 1, 2, 3, 4, 5, 6].map(i => E.addDays(mon, i));
+    const st = weekStartOf(d);
+    return [0, 1, 2, 3, 4, 5, 6].map(i => E.addDays(st, i));
   }
   function periodLabel(days) {
     if (UI.soinsVue === 'jour') { const t = dateFr(days[0]); return t.charAt(0).toUpperCase() + t.slice(1); }
@@ -881,7 +883,7 @@
           const pill = st.absent ? '<span class="pill warn">❌ absent' + (st.absent.facture ? ' · facturé' : '') + '</span>' : st.done ? '<span class="pill ok">✅ fait</span>' : st.prevu ? '<span class="pill info">prévu</span>' : '<span class="pill" style="background:#EEF1F4;color:var(--muted)">à faire</span>';
           h += '<div class="item" style="display:block;cursor:default;padding:10px 12px 10px 14px"><div class="rowx" style="align-items:flex-start"><a href="#patient/' + pid + '" style="text-decoration:none;color:inherit;flex:1;min-width:0"><div class="t"><span style="color:var(--accent)">' + (i + 1) + '.</span> ' + esc(p.nom) + '</div>' +
             '<div class="s">' + esc([p.adresse, p.code ? 'code ' + p.code : '', p.etage ? 'ét. ' + p.etage : ''].filter(Boolean).join(' · ')) + '</div>' +
-            (st.notes.length ? '<div class="s" style="color:var(--ink)">' + esc(st.notes.map(s => actsText(s.acts)).join(' · ')) + '</div>' : '') + '</a>' + pill + '</div>' +
+            (st.notes.length ? '<div class="s" style="color:var(--ink)">' + esc(st.notes.map(s => actsText(s.acts)).join(' · ')) + '</div>' : '') + trLines(pid, d) + '</a>' + pill + '</div>' +
             '<div style="display:flex;gap:8px;margin-top:8px">' +
             '<a class="chip" style="display:inline-flex;align-items:center;text-decoration:none;min-height:40px;font-size:14px" href="#ajout?patient=' + pid + '&date=' + d + '&back=tournee">+ Soins</a>' +
             (st.prevu && !st.done && !st.absent ? '<button class="chip" data-fait="' + pid + '" style="min-height:40px;font-size:14px">Fait</button>' : '') +
@@ -922,28 +924,37 @@
   function editTournee(date) {
     let ordre = ((S.tournees || {})[date] || []).filter(id => pat(id));
     let q = '';
+    let selCab = S.cabinets.length === 1 ? S.cabinets[0].id : null;
     const m = document.createElement('div'); m.className = 'modal';
     m.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" style="max-height:92vh"></div>';
     document.body.appendChild(m);
     const sh = $('.sheet', m);
     const close = () => m.remove();
     const draw = () => {
-      let h = '<h2>Tournée du ' + esc(dateFr(date)) + '</h2><p class="note">Touche les patients dans l’ordre où tu vas les voir.</p>';
+      let h = '<h2>Tournée du ' + esc(dateFr(date)) + '</h2><p class="note">Choisis le cabinet, puis touche les patients dans l’ordre où tu vas les voir.</p>';
       h += '<div class="section">Ordre de passage (' + ordre.length + ')</div>';
       h += ordre.length ? '<div class="list">' + ordre.map((id, i) => '<div class="item" style="cursor:default;padding:6px 6px 6px 14px;min-height:48px"><span style="flex:1"><b style="color:var(--accent)">' + (i + 1) + '.</b> ' + esc(pat(id).nom) + '</span><span style="display:flex;gap:4px"><button class="icon-btn" data-up="' + i + '" aria-label="Monter"' + (i ? '' : ' disabled') + '>↑</button><button class="icon-btn" data-down="' + i + '" aria-label="Descendre"' + (i < ordre.length - 1 ? '' : ' disabled') + '>↓</button><button class="icon-btn" data-rm="' + i + '" aria-label="Retirer">✕</button></span></div>').join('') + '</div>' : '<p class="note">Aucun patient pour l’instant.</p>';
-      h += '<div class="section">Ajouter des patients</div><input class="in" id="tq" placeholder="Rechercher" autocomplete="off" value="' + esc(q) + '" style="margin-bottom:8px">';
-      S.cabinets.forEach(c => {
-        const pts = S.patients.filter(p => p.cabinetId === c.id && !ordre.includes(p.id) && (!q || norm(p.nom).includes(norm(q)) || norm(p.adresse).includes(norm(q)))).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
-        if (!pts.length) return;
-        h += '<div class="note" style="font-weight:700;margin:10px 4px 6px">' + esc(c.nom) + '</div><div class="list">' + pts.map(p => '<button class="item" data-add="' + p.id + '" style="min-height:48px;padding:8px 14px"><span><span class="t" style="font-weight:600">' + esc(p.nom) + '</span>' + (statut(p.id, date).prevu ? ' <span class="pill info" style="font-size:11px">prévu</span>' : '') + '</span><span style="font-size:22px;color:var(--accent)">+</span></button>').join('') + '</div>';
-      });
+      if (!selCab) {
+        h += '<div class="section">Choisis le cabinet</div><div class="list">' + S.cabinets.map(cb => {
+          const n = S.patients.filter(p => p.cabinetId === cb.id && !ordre.includes(p.id)).length;
+          return '<button class="item" data-cab="' + cb.id + '" style="min-height:52px"><div><div class="t">' + esc(cb.nom) + '</div><div class="s">' + n + ' patient' + (n > 1 ? 's' : '') + ' à ajouter</div></div><span style="font-size:20px;color:var(--accent)">›</span></button>';
+        }).join('') + '</div>';
+      } else {
+        const cb = cab(selCab);
+        h += '<div class="rowx" style="margin:16px 4px 8px">' + (S.cabinets.length > 1 ? '<button class="back" id="t-cabs" style="min-height:36px">‹ Cabinets</button>' : '<span></span>') + '<b>' + esc(cb.nom) + '</b></div>';
+        h += '<input class="in" id="tq" placeholder="Rechercher dans ce cabinet" autocomplete="off" value="' + esc(q) + '" style="margin-bottom:8px">';
+        const pts = S.patients.filter(p => p.cabinetId === selCab && !ordre.includes(p.id) && (!q || norm(p.nom).includes(norm(q)) || norm(p.adresse).includes(norm(q)))).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+        h += pts.length ? '<div class="list">' + pts.map(p => '<button class="item" data-add="' + p.id + '" style="min-height:48px;padding:8px 14px"><span><span class="t" style="font-weight:600">' + esc(p.nom) + '</span>' + (statut(p.id, date).prevu ? ' <span class="pill info" style="font-size:11px">prévu</span>' : '') + '</span><span style="font-size:22px;color:var(--accent)">+</span></button>').join('') + '</div>' : '<p class="note">' + (q ? 'Aucun patient trouvé.' : 'Tous les patients de ce cabinet sont dans la tournée.') + '</p>';
+      }
       h += '<div class="btns" style="position:sticky;bottom:0;background:var(--bg);padding-top:8px;margin-bottom:0"><button class="btn ghost" id="t-cancel">Annuler</button><button class="btn accent" id="t-ok">Valider</button></div>';
       sh.innerHTML = h;
       $$('[data-add]', sh).forEach(b => b.onclick = () => { ordre.push(b.dataset.add); const st = sh.scrollTop; draw(); sh.scrollTop = st; });
       $$('[data-rm]', sh).forEach(b => b.onclick = () => { ordre.splice(+b.dataset.rm, 1); draw(); });
       $$('[data-up]', sh).forEach(b => b.onclick = () => { const i = +b.dataset.up; [ordre[i - 1], ordre[i]] = [ordre[i], ordre[i - 1]]; draw(); });
       $$('[data-down]', sh).forEach(b => b.onclick = () => { const i = +b.dataset.down; [ordre[i + 1], ordre[i]] = [ordre[i], ordre[i + 1]]; draw(); });
-      const tq = $('#tq', sh); tq.oninput = () => { q = tq.value; const pos = tq.selectionStart; draw(); const n = $('#tq', sh); n.focus(); n.setSelectionRange(pos, pos); };
+      $$('[data-cab]', sh).forEach(b => b.onclick = () => { selCab = b.dataset.cab; q = ''; draw(); });
+      const tc = $('#t-cabs', sh); if (tc) tc.onclick = () => { selCab = null; q = ''; draw(); };
+      const tq = $('#tq', sh); if (tq) tq.oninput = () => { q = tq.value; const pos = tq.selectionStart; draw(); const n = $('#tq', sh); n.focus(); n.setSelectionRange(pos, pos); };
       $('#t-cancel', sh).onclick = close;
       $('#t-ok', sh).onclick = () => { S.tournees = S.tournees || {}; if (ordre.length) S.tournees[date] = ordre; else delete S.tournees[date]; save(); close(); route(); };
     };
@@ -977,9 +988,84 @@
       });
   }
 
+  // ----- Transmissions (semaine du mardi au lundi) -----
+  function weekStartOf(date) { const off = (E.parseIso(date).getDay() - 2 + 7) % 7; return E.addDays(date, -off); }
+  function trGet(week, mode, pid) { const w = (S.transmissions || {})[week]; return w && w[mode] && w[mode][pid]; }
+  function trSet(week, mode, pid, val) {
+    S.transmissions = S.transmissions || {};
+    const w = S.transmissions[week] = S.transmissions[week] || { recues: {}, donner: {} };
+    w[mode] = w[mode] || {};
+    if (val) w[mode][pid] = val; else delete w[mode][pid];
+    save();
+  }
+  const trText = t => t ? (t.ras ? 'RAS ✅' : t.text) : '';
+  function trLines(pid, date) {
+    const wk = weekStartOf(date); const r = trGet(wk, 'recues', pid), d = trGet(wk, 'donner', pid);
+    return (r ? '<div class="tr r">📥 ' + esc(trText(r)) + '</div>' : '') + (d ? '<div class="tr g">📤 ' + esc(trText(d)) + '</div>' : '');
+  }
+  function viewTransmissions() {
+    if (!UI.trMode) UI.trMode = 'recues';
+    if (!UI.trWeek) { const t = today(); UI.trWeek = weekStartOf(E.parseIso(t).getDay() === 1 && UI.trMode === 'recues' ? E.addDays(t, 1) : t); }
+    if (S.cabinets.length === 1) UI.trCab = S.cabinets[0].id;
+    const wk = UI.trWeek, end = E.addDays(wk, 6);
+    const MC = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+    const fmt = s => { const d = E.parseIso(s); return JOURS_LONG[d.getDay()].replace(/^./, x => x.toUpperCase()) + ' ' + d.getDate() + ' ' + MC[d.getMonth()]; };
+    let h = brandTop('Transmissions');
+    h += '<div class="chips" style="display:grid;grid-template-columns:1fr 1fr;margin-bottom:10px"><button class="chip tr-chip-r' + (UI.trMode === 'recues' ? ' on' : '') + '" data-mode="recues" aria-pressed="' + (UI.trMode === 'recues') + '">📥 Reçues</button><button class="chip tr-chip-g' + (UI.trMode === 'donner' ? ' on' : '') + '" data-mode="donner" aria-pressed="' + (UI.trMode === 'donner') + '">📤 À donner</button></div>';
+    h += '<div class="rowx" style="margin-bottom:12px"><button class="icon-btn" id="w-prev" aria-label="Semaine précédente" style="background:#fff">‹</button><b style="font-size:16px">' + fmt(wk) + ' → ' + fmt(end) + '</b><button class="icon-btn" id="w-next" aria-label="Semaine suivante" style="background:#fff">›</button></div>';
+    const c = UI.trCab && cab(UI.trCab);
+    if (!c) {
+      h += '<div class="section">Choisis le cabinet</div><div class="list">' + S.cabinets.map(cb => {
+        const n = Object.keys((((S.transmissions || {})[wk] || {})[UI.trMode]) || {}).filter(pid => (pat(pid) || {}).cabinetId === cb.id).length;
+        return '<button class="item" data-trcab="' + cb.id + '"><div><div class="t">' + esc(cb.nom) + '</div><div class="s">' + (n ? n + ' transmission' + (n > 1 ? 's' : '') + ' notée' + (n > 1 ? 's' : '') : 'Aucune transmission notée') + '</div></div><span style="font-size:20px;color:var(--accent)">›</span></button>';
+      }).join('') + '</div>';
+      if (!S.cabinets.length) h += '<p class="note">Crée d’abord un cabinet.</p>';
+    } else {
+      h += '<div class="rowx" style="margin:0 4px 8px">' + (S.cabinets.length > 1 ? '<button class="back" id="tr-cabs" style="min-height:36px">‹ Cabinets</button>' : '<span></span>') + '<b>' + esc(c.nom) + '</b></div>';
+      h += '<input class="in" id="tr-q" placeholder="Rechercher un patient" autocomplete="off" value="' + esc(UI.trQ || '') + '" style="margin-bottom:10px"><div id="tr-list"></div>';
+    }
+    app.innerHTML = h;
+    $$('[data-mode]').forEach(b => b.onclick = () => { UI.trMode = b.dataset.mode; route(); });
+    $('#w-prev').onclick = () => { UI.trWeek = E.addDays(UI.trWeek, -7); route(); };
+    $('#w-next').onclick = () => { UI.trWeek = E.addDays(UI.trWeek, 7); route(); };
+    $$('[data-trcab]').forEach(b => b.onclick = () => { UI.trCab = b.dataset.trcab; UI.trQ = ''; route(); });
+    const back = $('#tr-cabs'); if (back) back.onclick = () => { UI.trCab = null; route(); };
+    if (!c) return;
+    const draw = () => {
+      const q = norm(UI.trQ || '').trim();
+      const vus = new Set(S.soins.filter(s => (s.rec || {}).type === 'once' && s.start >= wk && s.start <= end).map(s => s.patientId));
+      const pts = S.patients.filter(p => p.cabinetId === c.id && (!q || norm(p.nom).includes(q) || norm(p.adresse).includes(q)))
+        .sort((a, b) => (+!!trGet(wk, UI.trMode, b.id) - +!!trGet(wk, UI.trMode, a.id)) || (+vus.has(b.id) - +vus.has(a.id)) || a.nom.localeCompare(b.nom, 'fr'));
+      const cls = UI.trMode === 'recues' ? 'r' : 'g';
+      $('#tr-list').innerHTML = pts.length ? '<div class="list">' + pts.map(p => {
+        const t = trGet(wk, UI.trMode, p.id);
+        return '<div class="item" style="display:block;padding:10px 12px 10px 14px"><div class="rowx" style="gap:8px"><button class="back" data-tredit="' + p.id + '" style="flex:1;min-width:0;text-align:left;color:inherit;font-weight:700;min-height:40px;display:block">' + esc(p.nom) + (vus.has(p.id) ? ' <span class="pill info" style="font-size:11px;font-weight:700">vu</span>' : '') + '</button>' +
+          (t ? '' : '<button class="chip" data-ras="' + p.id + '" style="min-height:40px;font-size:14px;padding:0 10px">RAS ✅</button><button class="chip" data-tredit="' + p.id + '" style="min-height:40px;font-size:14px;padding:0 10px">Info</button>') + '</div>' +
+          (t ? '<button class="tr ' + cls + '" data-tredit="' + p.id + '" style="width:100%;text-align:left;border:0;cursor:pointer;font:inherit;font-size:14px">' + esc(trText(t)) + '</button>' : '') + '</div>';
+      }).join('') + '</div>' : '<p class="note">Aucun patient' + (q ? ' trouvé' : '') + '.</p>';
+      $$('[data-ras]').forEach(b => b.onclick = () => { trSet(wk, UI.trMode, b.dataset.ras, { ras: true }); draw(); });
+      $$('[data-tredit]').forEach(b => b.onclick = () => trEdit(wk, UI.trMode, b.dataset.tredit, draw));
+    };
+    $('#tr-q').oninput = e => { UI.trQ = e.target.value; draw(); };
+    draw();
+  }
+  function trEdit(wk, mode, pid, done) {
+    const p = pat(pid); const t = trGet(wk, mode, pid);
+    sheet('<h2>' + esc(p.nom) + '</h2><p class="note">' + (mode === 'recues' ? '📥 Transmission reçue' : '📤 Transmission à donner') + ' · semaine du ' + esc(dateFr(wk)) + '</p>' +
+      '<textarea class="in" id="tr-txt" style="min-height:130px" placeholder="Tape ou dicte : TA à surveiller, pansement à refaire…">' + esc(t && !t.ras ? t.text : '') + '</textarea>' +
+      '<div class="btns"><button class="btn ghost" id="tr-ras">RAS ✅</button><button class="btn accent" id="tr-ok">Enregistrer</button></div>' +
+      (t ? '<button class="btn danger" id="tr-del">Effacer</button>' : '<button class="btn" data-close>Annuler</button>'),
+      (m, close) => {
+        $('#tr-ras', m).onclick = () => { trSet(wk, mode, pid, { ras: true }); close(); done && done(); };
+        $('#tr-ok', m).onclick = () => { const v = $('#tr-txt', m).value.trim(); trSet(wk, mode, pid, v ? { text: v } : null); close(); done && done(); };
+        const del = $('#tr-del', m); if (del) del.onclick = () => { trSet(wk, mode, pid, null); close(); done && done(); };
+        setTimeout(() => { const ta = $('#tr-txt', m); if (ta && !t) ta.focus(); }, 50);
+      });
+  }
+
   // ----- Réglages -----
   function viewReglages() {
-    let h = brandTop('Réglages');
+    let h = backTop('#mois', 'Accueil') + '<h1 style="font-size:24px;margin:0 0 8px">Réglages</h1>';
     h += '<div class="list"><a class="item" href="#cabinets"><div><div class="t">Cabinets et rétrocession</div><div class="s">' + S.cabinets.length + ' cabinet(s)</div></div><span class="s">›</span></a>' +
       '<a class="item" href="#tarifs"><div><div class="t">Tarifs NGAP</div><div class="s">AMI ' + eur(E.amiValue(today(), S.tarifs)) + ' aujourd’hui · avenant 11</div></div><span class="s">›</span></a></div>';
     h += '<div class="section">Règles</div>';

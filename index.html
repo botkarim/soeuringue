@@ -111,6 +111,11 @@ table.det th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:v
 table.det td.m,table.det th.m{text-align:right;white-space:nowrap}
 .tablewrap{overflow-x:auto;border-radius:var(--r);background:#fff;margin-bottom:12px}
 .print-only{display:none}
+.tr{border-radius:10px;padding:6px 10px;margin-top:6px;font-size:13px;line-height:1.35;color:var(--ink)}
+.tr.r{background:#FDF3D6}
+.tr.g{background:#E2F4E8}
+.chip.tr-chip-r.on{background:#B7791F;border-color:#B7791F}
+.chip.tr-chip-g.on{background:#2F855A;border-color:#2F855A}
 #splash{position:fixed;inset:0;z-index:100;background:#E4F5FC;display:flex;align-items:center;justify-content:center;transition:opacity .35s ease}
 #splash img{width:min(78vw,380px);height:auto}
 #splash.out{opacity:0;pointer-events:none}
@@ -149,7 +154,7 @@ body.noTabs{padding-bottom:calc(80px + env(safe-area-inset-bottom))}
   <a href="#cabinets" data-tab="cabinets"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21V9l8-5 8 5v12"/><path d="M9 21v-6h6v6"/></svg>Cabinets</a>
   <a href="#patients" data-tab="patients"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>Patients</a>
   <a href="#soins" data-tab="soins"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M3.5 6l1.5 1.5L7.5 5M3.5 12l1.5 1.5 2.5-2.5M3.5 18l1.5 1.5 2.5-2.5"/></svg>Mes soins</a>
-  <a href="#reglages" data-tab="reglages"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Réglages</a>
+  <a href="#transmissions" data-tab="transmissions"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>Transmis.</a>
 </nav>
 <script src="engine.js"></script>
 <script src="app.js"></script>

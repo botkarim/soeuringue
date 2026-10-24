@@ -28,7 +28,9 @@ Soeuringue est une appli web installable. Tu la mets en ligne une fois (gratuit)
 
 - **Créer les cabinets** : un par titulaire, avec la rétrocession (10 % par défaut).
 - **+ Noter un passage** : elle choisit le patient, tape ou dicte les soins avec le micro du clavier (« pansement d'escarre + insuline + glycémie »), appuie sur **Reconnaître**, vérifie les actes et la date, puis **Enregistrer**. Le passage compte pour ce jour-là seulement. Le formulaire se vide ensuite pour le patient suivant. Ça marche sans réseau.
-- **Mes soins** : la tournée du jour. **Créer la tournée** : coche les patients dans l'ordre de passage. Sur chaque ligne : **+ Soins**, **Absent** (avec ou sans facturation, pour ton estimation seulement). En fin de journée : **Bilan pour la note**, puis **Copier**, et colle-le dans la note partagée. Plus bas : ta part, le revenu par soin et les passages, par jour, semaine ou mois.
+- **Mes soins** : la tournée du jour. **Créer la tournée** : choisis le cabinet, puis touche les patients dans l'ordre de passage (« ‹ Cabinets » pour en ajouter d'un autre cabinet). Sur chaque ligne : **+ Soins**, **Absent** (avec ou sans facturation, pour ton estimation seulement). En fin de journée : **Bilan pour la note**, puis **Copier**, et colle-le dans la note partagée. Plus bas : ta part, le revenu par soin et les passages, par jour, semaine ou mois.
+- **Transmissions** (semaine du mardi au lundi) : **📥 Reçues** le lundi de la collègue, **📤 À donner** à la fin de sa semaine. Choisis le cabinet, cherche le patient, puis **RAS ✅** ou **Info**. Les transmissions s'affichent ensuite en jaune (reçues) ou en vert (à donner) dans la tournée et sur la fiche patient.
+- **Réglages** : la roue ⚙︎ en haut de l'accueil.
 - **Refaire** : sur la fiche d'un patient, ce bouton recopie un passage au jour choisi (hier, aujourd'hui, demain ou autre date).
 - **Nom dans la note** : dans la fiche patient, à remplir seulement si le nom de famille déduit automatiquement ne convient pas.
 - **Répéter** (facultatif) : pour un remplacement long, un soin peut être répété tous les jours, tous les 2 jours ou certains jours.
@@ -47,7 +49,7 @@ Dans **Réglages**, puis **Sauvegarder** : ça crée un fichier chiffré par un 
 
 ## 7. Mise à jour de l'appli
 
-Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.5.1` devient `v1.5.2`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
+Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.6.0` devient `v1.6.1`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
 
 ---
 Les montants sont des **estimations** calculées selon la NGAP (avenant 11), la brochure Idelstory et le guide CBA. Les tarifs et les règles sont modifiables dans Réglages. Pour un cas particulier, il y a **Ajouter un acte à la main**, puis **Acte manuel**.
