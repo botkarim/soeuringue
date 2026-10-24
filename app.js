@@ -471,38 +471,50 @@
     const recs = soins.filter(s => (s.rec || {}).type !== 'once');
     const actifs = recs.filter(s => !s.end || s.end >= today()), finis = recs.filter(s => s.end && s.end < today());
     const passes = soins.filter(s => (s.rec || {}).type === 'once').sort((a, b) => b.start.localeCompare(a.start) || (b.heure || '').localeCompare(a.heure || ''));
-    let h = backTop('#patients/' + p.cabinetId, c ? c.nom : 'Patients', '<button class="back" id="pt-edit">Modifier</button>');
-    h += '<h1 style="font-size:26px;margin:0 0 2px">' + esc(p.nom) + '</h1><p class="note" style="margin:0 0 12px">' + badges(p) + '</p>';
+    const isAbs = s => (S.absences || []).some(a => a.patientId === s.patientId && a.date === s.start);
+    let h = '<div class="top" style="margin-bottom:4px;min-height:40px"><a class="back" href="#patients/' + p.cabinetId + '">‹ ' + esc(c ? c.nom : 'Patients') + '</a><button class="back" id="pt-edit">Modifier</button></div>';
+    h += '<h1 style="font-size:24px;margin:0;line-height:1.2">' + esc(p.nom) + '</h1>';
+    const bd = badges(p); if (bd !== 'Patient') h += '<p class="note" style="margin:2px 0 0;font-size:13px">' + bd + '</p>';
     if (p.adresse || p.code || p.etage || p.porte || p.tel) {
-      h += '<div class="card">';
-      if (p.adresse) h += '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Adresse</div><div style="font-size:16px;font-weight:600;line-height:1.35;margin:2px 0 10px">' + esc(p.adresse) + '</div>';
-      const box = (l, v) => '<div style="background:var(--bg);border-radius:12px;padding:10px"><div style="font-size:12px;color:var(--muted)">' + l + '</div><div style="font-size:20px;font-weight:800;letter-spacing:.5px;word-break:break-all">' + (v ? esc(v) : '—') + '</div></div>';
-      if (p.code || p.etage || p.porte) h += '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:10px">' + box('Code', p.code) + box('Étage', p.etage) + box('Porte', p.porte) + '</div>';
-      h += '<div style="display:grid;grid-template-columns:repeat(' + ((p.adresse && p.tel) ? 2 : 1) + ',minmax(0,1fr));gap:8px">' +
-        (p.adresse ? '<a class="btn accent" style="min-height:48px;font-size:15px" href="' + mapsUrl(p) + '" target="_blank" rel="noopener">Google Maps</a>' : '') +
-        (p.tel ? '<a class="btn ghost" style="min-height:48px;font-size:15px" href="tel:' + esc(p.tel.replace(/[^\d+]/g, '')) + '">' + esc(p.tel) + '</a>' : '') + '</div></div>';
+      const tag = (l, v) => v ? '<span class="pill info" style="font-size:13px;padding:5px 10px">' + l + ' <b>' + esc(v) + '</b></span>' : '';
+      h += '<div class="card" style="padding:12px 14px;margin-top:10px">';
+      if (p.adresse) h += '<div style="font-size:15px;font-weight:600;line-height:1.3">' + esc(p.adresse) + '</div>';
+      if (p.code || p.etage || p.porte) h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">' + tag('Code', p.code) + tag('Étage', p.etage) + tag('Porte', p.porte) + '</div>';
+      if (p.adresse || p.tel) h += '<div style="display:grid;grid-template-columns:repeat(' + ((p.adresse && p.tel) ? 2 : 1) + ',minmax(0,1fr));gap:8px;margin-top:10px">' +
+        (p.adresse ? '<a class="btn accent" style="min-height:44px;font-size:15px" href="' + mapsUrl(p) + '" target="_blank" rel="noopener">Maps</a>' : '') +
+        (p.tel ? '<a class="btn ghost" style="min-height:44px;font-size:15px" href="tel:' + esc(p.tel.replace(/[^\d+]/g, '')) + '">Appeler</a>' : '') + '</div>';
+      h += '</div>';
     }
-    if (p.noteSoin) h += '<div class="card" style="background:#FDF6E8"><div style="font-size:12px;font-weight:700;color:#7A5A12;text-transform:uppercase;letter-spacing:.5px">Note de soin</div><div style="margin:6px 0 8px;line-height:1.4">' + esc(p.noteSoin) + '</div><a href="#ajout?patient=' + id + '&note=1" style="font-weight:700;text-decoration:none">Créer le soin à partir de cette note ›</a></div>';
-    const passItem = s => '<div class="item" style="cursor:default;padding:10px 12px 10px 16px"><div><div class="t" style="font-size:15px">' + esc(dateFr(s.start)) + ((S.absences || []).some(a => a.patientId === s.patientId && a.date === s.start) ? ' <span class="pill warn" style="font-size:11px">absent</span>' : '') + '</div><div class="s">' + esc(actsText(s.acts)) + '</div></div>' +
-      '<div style="display:flex;gap:6px;align-items:center"><button class="chip" data-redo="' + s.id + '" style="min-height:40px;padding:0 12px;font-size:14px">Refaire</button><button class="icon-btn" data-soin-menu="' + s.id + '" aria-label="Plus d’options">⋯</button></div></div>';
-    h += '<div class="btns"><a class="btn" href="#ajout?patient=' + id + '">+ Ajouter un passage</a></div>';
-    h += '<div class="section">Derniers passages</div>';
-    h += passes.length ? '<div class="list">' + passes.slice(0, UI.allPass ? 999 : 6).map(passItem).join('') + '</div>' + (passes.length > 6 ? '<button class="back" id="pt-all" style="margin:0 4px 8px">' + (UI.allPass ? 'Voir moins' : 'Voir les ' + passes.length + ' passages') + '</button>' : '') : '<p class="note">Aucun passage noté pour l’instant.</p>';
-    if (actifs.length) h += '<div class="section">Soins répétés</div>';
-    const soinItem = s => '<div class="item" style="cursor:default"><div><div class="t">' + esc((s.heure || '').replace(':', ' h ')) + ' — ' + esc(actsText(s.acts)) + '</div><div class="s">' + esc(recText(s)) + (s.dimanche ? ' · dim./fériés' : '') + (s.nuit ? ' · nuit' : '') + '</div></div>' +
-      '<div style="display:flex;gap:6px"><a class="icon-btn" style="display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:15px" href="#ajout?soin=' + s.id + '" aria-label="Modifier ce soin">✎</a><button class="icon-btn" data-soin-menu="' + s.id + '" aria-label="Plus d’options">⋯</button></div></div>';
-    if (actifs.length) h += '<div class="list">' + actifs.map(soinItem).join('') + '</div>';
-    h += '<div class="section">Cotation d’un jour</div><input class="in" type="date" id="pt-date" value="' + UI.patientDate + '">';
-    h += cotationBox(E.coteJour(p, S.soins, UI.patientDate, copts()), dateFr(UI.patientDate));
-    h += '<div class="card rowx" style="margin-top:12px;background:var(--ink);color:#fff"><div><div style="font-size:13px;opacity:.85">Facturé en ' + monthLabel(UI.month) + '</div><div style="font-size:13px;opacity:.85">ta part : ' + eur((d.byPat[id] || 0) * (1 - ((c && c.retro) || 0) / 100)) + '</div></div><b style="font-size:22px">' + eur(d.byPat[id] || 0) + '</b></div>';
-    if (finis.length) h += '<div class="section">Soins répétés terminés</div><div class="list">' + finis.map(soinItem).join('') + '</div>';
+    if (p.noteSoin) h += '<a class="card rowx" href="#ajout?patient=' + id + '&note=1" style="background:#FDF6E8;padding:10px 14px;text-decoration:none;color:inherit;gap:10px"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px">' + esc(p.noteSoin) + '</span><b style="color:var(--accent);font-size:14px;white-space:nowrap">Créer le soin ›</b></a>';
+    h += '<a class="btn" href="#ajout?patient=' + id + '" style="min-height:46px;margin:2px 0 4px">+ Ajouter un passage</a>';
+    const passItem = s => '<div class="item" style="padding:6px 8px 6px 14px;min-height:54px"><button class="back" data-pass="' + s.id + '" style="flex:1;min-width:0;text-align:left;color:inherit;display:block;font-weight:400;min-height:42px"><div class="t" style="font-size:15px">' + esc(dateFr(s.start)) + (isAbs(s) ? ' <span class="pill warn" style="font-size:11px">absent</span>' : '') + '</div><div class="s" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">' + esc(actsText(s.acts)) + '</div></button>' +
+      '<button class="chip" data-redo="' + s.id + '" style="min-height:40px;padding:0 12px;font-size:14px;flex:none">Refaire</button></div>';
+    h += '<div class="rowx" style="margin:12px 4px 6px"><span class="note" style="font-weight:700;text-transform:uppercase;letter-spacing:.5px;font-size:12px">Derniers passages</span>' + (passes.length > 3 ? '<button class="back" id="pt-all" style="min-height:32px;font-size:14px">' + (UI.allPass ? 'Voir moins' : 'Voir tout (' + passes.length + ')') + '</button>' : '') + '</div>';
+    h += passes.length ? '<div class="list" style="margin-bottom:8px">' + passes.slice(0, UI.allPass ? 999 : 3).map(passItem).join('') + '</div>' : '<p class="note" style="margin:0 4px 8px">Aucun passage noté pour l’instant.</p>';
+    const soinItem = s => '<button class="item" data-soin-menu="' + s.id + '" style="padding:8px 14px"><div><div class="t" style="font-size:15px">' + esc(actsText(s.acts)) + '</div><div class="s">' + esc(recText(s)) + (s.dimanche ? ' · dim./fériés' : '') + '</div></div><span class="s">⋯</span></button>';
+    if (actifs.length) h += '<div class="note" style="font-weight:700;text-transform:uppercase;letter-spacing:.5px;font-size:12px;margin:10px 4px 6px">Soins répétés</div><div class="list" style="margin-bottom:8px">' + actifs.map(soinItem).join('') + '</div>';
+    const mt = d.byPat[id] || 0;
+    h += '<div class="rowx" style="background:var(--ink);color:#fff;border-radius:14px;padding:10px 14px;margin-top:4px"><span style="font-size:14px">' + esc(monthLabel(UI.month).replace(/^./, x => x.toUpperCase())) + ' · ta part ' + eur(mt * (1 - ((c && c.retro) || 0) / 100)) + '</span><b>' + eur(mt) + '</b></div>';
+    if (finis.length) h += '<div class="note" style="font-weight:700;text-transform:uppercase;letter-spacing:.5px;font-size:12px;margin:14px 4px 6px">Soins répétés terminés</div><div class="list">' + finis.map(soinItem).join('') + '</div>';
     app.innerHTML = h;
     $('#pt-edit').onclick = () => editPatient(id);
-    $('#pt-date').onchange = e => { UI.patientDate = e.target.value || today(); route(); };
     $$('[data-soin-menu]').forEach(b => b.onclick = () => soinMenu(b.dataset.soinMenu));
     $$('[data-redo]').forEach(b => b.onclick = () => redoToday(b.dataset.redo));
+    $$('[data-pass]').forEach(b => b.onclick = () => passageSheet(b.dataset.pass));
     const all = $('#pt-all'); if (all) all.onclick = () => { UI.allPass = !UI.allPass; route(); };
     if (UI.mapsPrompt === id && p.adresse) { UI.mapsPrompt = null; mapsSheet(p); }
+  }
+  function passageSheet(sid) {
+    const s = S.soins.find(x => x.id === sid); const p = pat(s.patientId);
+    const pass = E.coteJour(p, S.soins, s.start, copts());
+    sheet(cotationBox(pass, dateFr(s.start).replace(/^./, x => x.toUpperCase()) + (pass.length > 1 ? ' (tous les passages du jour)' : '')).replace('class="cot"', 'class="cot" style="margin-top:0"') +
+      '<div class="btns"><button class="btn ghost" id="ps-redo">Refaire</button><a class="btn ghost" href="#ajout?soin=' + sid + '" id="ps-edit">Modifier</a></div>' +
+      '<div class="btns" style="margin-top:0"><button class="btn danger" id="ps-del">Supprimer</button><button class="btn" data-close>Fermer</button></div>',
+      (m, close) => {
+        $('#ps-redo', m).onclick = () => { close(); redoToday(sid); };
+        $('#ps-edit', m).addEventListener('click', () => close());
+        $('#ps-del', m).onclick = () => confirmBox('Supprimer le passage du ' + dateFr(s.start) + ' ?', 'Supprimer', () => { S.soins = S.soins.filter(x => x.id !== sid); save(); close(); route(); });
+      });
   }
   function mapsSheet(p) {
     sheet('<h2>Ajouter dans Google Maps ?</h2><p class="note">Google Maps va s’ouvrir sur l’adresse de ' + esc(p.nom) + '. Touche <b>Enregistrer</b>, puis choisis ta liste de patients.</p>' +
