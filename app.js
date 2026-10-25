@@ -2182,13 +2182,21 @@
   (function hello() {
     const sp = document.getElementById('splash'); const n = (S.prenom || '').trim();
     if (!sp || !n) return;
-    const hr = new Date().getHours(); const wc = workCab(today());
+    const hr = new Date().getHours();
     const l1 = (hr >= 18 || hr < 5 ? 'Bonsoir ' : 'Bonjour ') + n + ' !';
-    const l2 = wc ? (hr >= 18 ? 'Bon courage pour la fin de journée' : 'Bon courage pour ta tournée') + ' · ' + wc.nom : (hr >= 18 ? 'Bonne soirée' : 'Bon courage !');
+    const PHRASES = ['Tu es la meilleure 💙', 'Tu gères comme une cheffe !', 'T’es la boss des IDEL 💪', 'Tes patients ont de la chance de t’avoir.',
+      'Une tournée de plus, une reine de plus 👑', 'Rien ne te résiste aujourd’hui !', 'Sérieuse, douce et efficace : c’est toi.', 'La tournée n’a qu’à bien se tenir 😎',
+      'Seringue en main, sourire aux lèvres ✨', 'Infirmière en or, cœur en or 💛', 'Tu fais un métier qui compte. Fière de toi !',
+      'Ton sourire soigne autant que tes mains 😊', 'Ta bienveillance fait toute la différence.', 'Personne ne pique aussi bien que toi 💉'];
+    if (norm(n) === 'hagere') PHRASES.push('Ton mari et ta fille t’aiment, ne l’oublie pas ❤️');
+    let last = -1; try { last = +localStorage.getItem('soeur_phrase'); } catch (e) {}
+    let k = Math.floor(Math.random() * PHRASES.length); if (k === last) k = (k + 1 + Math.floor(Math.random() * (PHRASES.length - 1))) % PHRASES.length;
+    try { localStorage.setItem('soeur_phrase', String(k)); } catch (e) {}
     const d = document.createElement('div'); d.className = 'hello';
-    d.innerHTML = '<b>' + esc(l1) + '</b><span>' + esc(l2) + '</span>';
+    d.innerHTML = '<b>' + esc(l1) + '</b><span>Bon courage !</span><i>' + esc(PHRASES[k]) + '</i>';
     sp.appendChild(d); sp.setAttribute('aria-hidden', 'false'); sp.setAttribute('role', 'status');
-    window.SOEUR_SPLASH_MS = 1900;
+    sp.addEventListener('click', () => { sp.classList.add('out'); setTimeout(() => sp.remove(), 400); });
+    window.SOEUR_SPLASH_MS = 4000;
   })();
   route();
 })();

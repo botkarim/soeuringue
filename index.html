@@ -47,9 +47,10 @@ a{color:var(--accent)}
 #splash{flex-direction:column;gap:18px}
 #splash .hello{opacity:0;transform:translateY(8px);animation:hello .5s .25s ease forwards;text-align:center;color:#1B3550;padding:0 24px}
 #splash .hello b{display:block;font-size:26px;font-weight:800;letter-spacing:-.3px}
-#splash .hello span{display:block;font-size:17px;font-weight:600;color:#3D5A73;margin-top:4px}
+#splash .hello span{display:block;font-size:19px;font-weight:700;color:#2C6A9A;margin-top:6px}
+#splash .hello i{display:block;font-style:normal;font-size:17px;font-weight:600;color:#3D5A73;margin-top:14px;opacity:0;animation:hello .5s .9s ease forwards}
 @keyframes hello{to{opacity:1;transform:none}}
-@media (prefers-reduced-motion:reduce){#splash .hello{animation:none;opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){#splash .hello,#splash .hello i{animation:none;opacity:1;transform:none}}
 .hero .row.white{background:#fff;color:var(--warn)}
 .hero .row.white.ok{color:var(--ok)}
 .section{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin:18px 4px 8px}
