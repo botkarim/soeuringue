@@ -52,6 +52,7 @@
   const pat = id => S.patients.find(p => p.id === id);
 
   function toast(msg) {
+    $$('.toast').forEach(x => x.remove());
     const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t);
     setTimeout(() => t.remove(), 2600);
   }
@@ -449,6 +450,7 @@
           route();
         };
         $('#pe-del', m).onclick = () => confirmBox('Supprimer ' + p.nom + ' et tous ses soins ?', 'Supprimer', () => {
+          IDB.all().then(all => delPhotos(all.filter(x => x.patientId === id).map(x => x.id))).catch(() => {});
           S.patients = S.patients.filter(x => x.id !== id); S.soins = S.soins.filter(s => s.patientId !== id); save(); close(); location.hash = '#patients/' + p.cabinetId;
         });
       });
@@ -488,7 +490,10 @@
       h += '</div>';
     }
     if (p.noteSoin) h += '<a class="card rowx" href="#ajout?patient=' + id + '&note=1" style="background:#FDF6E8;padding:10px 14px;text-decoration:none;color:inherit;gap:10px"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px">' + esc(p.noteSoin) + '</span><b style="color:var(--accent);font-size:14px;white-space:nowrap">Créer le soin ›</b></a>';
-    h += '<a class="btn" href="#ajout?patient=' + id + '" style="min-height:46px;margin:2px 0 4px">+ Ajouter un passage</a>';
+    const nph = patientPhotos(id).length;
+    h += '<div class="g2" style="grid-template-columns:1fr auto auto;margin:2px 0 4px"><a class="btn" href="#ajout?patient=' + id + '" style="min-height:46px">+ Passage</a>' +
+      '<button class="btn ' + (p.ordo ? 'accent' : 'ghost') + ' small" id="pt-ordo" style="min-height:46px;padding:0 12px">📄 Ordo' + (p.ordo ? ' ✓' : '') + '</button>' +
+      '<button class="btn ghost small" id="pt-photos" style="min-height:46px;padding:0 12px">📷' + (nph ? ' ' + nph : '') + '</button></div>';
     const passItem = s => '<div class="item" style="padding:6px 8px 6px 14px;min-height:54px"><button class="back" data-pass="' + s.id + '" style="flex:1;min-width:0;text-align:left;color:inherit;display:block;font-weight:400;min-height:42px"><div class="t" style="font-size:15px">' + esc(dateFr(s.start)) + (isAbs(s) ? ' <span class="pill warn" style="font-size:11px">absent</span>' : '') + '</div><div class="s" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">' + esc(actsText(s.acts)) + '</div></button>' +
       '<button class="chip" data-redo="' + s.id + '" style="min-height:40px;padding:0 12px;font-size:14px;flex:none">Refaire</button></div>';
     h += '<div class="rowx" style="margin:12px 4px 6px"><span class="note" style="font-weight:700;text-transform:uppercase;letter-spacing:.5px;font-size:12px">Derniers passages</span>' + (passes.length > 3 ? '<button class="back" id="pt-all" style="min-height:32px;font-size:14px">' + (UI.allPass ? 'Voir moins' : 'Voir tout (' + passes.length + ')') + '</button>' : '') + '</div>';
@@ -503,19 +508,24 @@
     $$('[data-soin-menu]').forEach(b => b.onclick = () => soinMenu(b.dataset.soinMenu));
     $$('[data-redo]').forEach(b => b.onclick = () => redoToday(b.dataset.redo));
     $$('[data-pass]').forEach(b => b.onclick = () => passageSheet(b.dataset.pass));
+    $('#pt-ordo').onclick = () => ordoMenu(id, () => route());
+    $('#pt-photos').onclick = () => photosSheet(id);
     const all = $('#pt-all'); if (all) all.onclick = () => { UI.allPass = !UI.allPass; route(); };
     if (UI.mapsPrompt === id && p.adresse) { UI.mapsPrompt = null; mapsSheet(p); }
   }
   function passageSheet(sid) {
     const s = S.soins.find(x => x.id === sid); const p = pat(s.patientId);
     const pass = E.coteJour(p, S.soins, s.start, copts());
+    const phs = (s.photos || []);
     sheet(cotationBox(pass, dateFr(s.start).replace(/^./, x => x.toUpperCase()) + (pass.length > 1 ? ' (tous les passages du jour)' : '')).replace('class="cot"', 'class="cot" style="margin-top:0"') +
+      (phs.length ? '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px">' + phs.map(id => '<button class="back" data-big="' + id + '" style="padding:0;min-height:0;display:block"><img data-pid="' + id + '" alt="Photo du soin" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;background:#dde7ee;display:block"></button>').join('') + '</div>' : '') +
       '<div class="btns"><button class="btn ghost" id="ps-redo">Refaire</button><a class="btn ghost" href="#ajout?soin=' + sid + '" id="ps-edit">Modifier</a></div>' +
       '<div class="btns" style="margin-top:0"><button class="btn danger" id="ps-del">Supprimer</button><button class="btn" data-close>Fermer</button></div>',
       (m, close) => {
+        fillThumbs(m); $$('[data-big]', m).forEach(b => b.onclick = async () => viewPhoto(await photoUrl(b.dataset.big), dateFr(s.start)));
         $('#ps-redo', m).onclick = () => { close(); redoToday(sid); };
         $('#ps-edit', m).addEventListener('click', () => close());
-        $('#ps-del', m).onclick = () => confirmBox('Supprimer le passage du ' + dateFr(s.start) + ' ?', 'Supprimer', () => { S.soins = S.soins.filter(x => x.id !== sid); save(); close(); route(); });
+        $('#ps-del', m).onclick = () => confirmBox('Supprimer le passage du ' + dateFr(s.start) + ' ?', 'Supprimer', () => { delPhotos(s.photos); S.soins = S.soins.filter(x => x.id !== sid); save(); close(); route(); });
       });
   }
   function mapsSheet(p) {
@@ -555,7 +565,7 @@
       (m, close) => {
         const st = $('#sm-stop', m); if (st) st.onclick = () => { s.end = E.addDays(today(), -1) < s.start ? s.start : E.addDays(today(), -1); save(); close(); toast('Soin arrêté'); route(); };
         $('#sm-dup', m).onclick = () => { close(); location.hash = '#ajout?dup=' + sid; };
-        $('#sm-del', m).onclick = () => confirmBox('Supprimer ce soin, passé compris ?', 'Supprimer', () => { S.soins = S.soins.filter(x => x.id !== sid); save(); close(); route(); });
+        $('#sm-del', m).onclick = () => confirmBox('Supprimer ce soin, passé compris ?', 'Supprimer', () => { delPhotos(s.photos); S.soins = S.soins.filter(x => x.id !== sid); save(); close(); route(); });
       });
   }
 
@@ -577,7 +587,8 @@
       rec: existing ? JSON.parse(JSON.stringify(existing.rec)) : { type: 'once', days: [1, 2, 3, 4, 5] },
       start, end: existing ? (existing.end || '') : '',
       dimanche: existing ? !!existing.dimanche : E.isDimancheOuFerie(start),
-      showDetail: false, back: q.back || ''
+      showDetail: false, back: q.back || '',
+      photoIds: existing ? (existing.photos || []).slice() : [], newPhotos: []
     };
     if (UI.draft.texte) { const r = parseLocal(UI.draft.texte); mergeActs(r.acts); UI.draft.unknown = r.unknown; }
     drawAjout();
@@ -590,11 +601,11 @@
     // cabinet + patient
     h += '<div class="g2" style="grid-template-columns:38% 1fr"><select class="in sm" id="a-cab" aria-label="Cabinet">' + S.cabinets.map(c => '<option value="' + c.id + '"' + (c.id === D.cabinetId ? ' selected' : '') + '>' + esc(c.nom) + '</option>').join('') + '</select>' +
       '<div style="position:relative"><input class="in sm" id="a-pat" value="' + esc(D.patientName) + '" placeholder="Patient" aria-label="Patient" autocomplete="off" autocapitalize="words"><div id="a-sugg" class="sugg-pop"></div></div></div>';
-    h += '<div id="a-newp"></div>';
+    h += '<div id="a-newp"></div><div id="a-tools"></div>';
     // texte + reconnaître
-    h += '<div class="g2" style="grid-template-columns:1fr auto;margin-top:8px"><textarea class="in sm" id="a-txt" rows="2" aria-label="Soins du passage" placeholder="Tape ou dicte : escarre + insuline + glycémie" style="min-height:64px;height:64px">' + esc(D.texte) + '</textarea>' +
-      '<div style="display:flex;flex-direction:column;gap:6px"><button class="btn small" id="a-local" style="min-height:' + (S.apiKey ? 29 : 64) + 'px;font-size:14px;padding:0 12px">Reconnaître</button>' +
-      (S.apiKey ? '<button class="btn ghost small" id="a-ai" style="min-height:29px;font-size:13px;padding:0 12px">IA</button>' : '') + '</div></div>';
+    h += '<div class="g2" style="grid-template-columns:1fr auto;margin-top:8px"><textarea class="in sm" id="a-txt" rows="2" aria-label="Soins du passage" placeholder="Tape ou dicte : escarre + insuline + glycémie" style="min-height:50px;height:50px">' + esc(D.texte) + '</textarea>' +
+      '<div style="display:flex;flex-direction:column;gap:6px"><button class="btn small" id="a-local" style="min-height:' + (S.apiKey ? 22 : 50) + 'px;font-size:14px;padding:0 12px">Reconnaître</button>' +
+      (S.apiKey ? '<button class="btn ghost small" id="a-ai" style="min-height:22px;font-size:13px;padding:0 12px">IA</button>' : '') + '</div></div>';
     if (D.unknown.length) h += '<div class="unknown" style="padding:6px 10px;margin:6px 0;font-size:13px">Pas reconnu : <b>' + D.unknown.map(esc).join(', ') + '</b></div>';
     // actes
     h += '<div class="rowx" style="margin:10px 4px 4px"><span class="note" style="font-weight:700;text-transform:uppercase;letter-spacing:.5px;font-size:12px">Actes du passage</span><button class="back" id="a-addact" style="min-height:32px;font-size:15px">+ Ajouter</button></div><div id="a-acts" style="max-height:192px;overflow:auto">';
@@ -619,7 +630,54 @@
     h += '<div id="a-cot"></div>';
     h += '<div class="savebar"><div style="display:flex;gap:10px;max-width:528px;margin:0 auto">' + (D.id ? '' : '<button class="btn ghost" id="a-abs" style="flex:0 0 108px">Absent</button>') + '<button class="btn" id="a-save" style="flex:1">Enregistrer</button></div></div>';
     app.innerHTML = h;
-    bindAjout(); drawSugg(); drawPreview();
+    bindAjout(); drawSugg(); drawTools(); drawPreview();
+  }
+  function drawTools() {
+    const D = UI.draft; const box = $('#a-tools'); if (!box) return;
+    const p = D.patientId && pat(D.patientId);
+    const o = p && p.ordo;
+    const nPh = D.photoIds.length + D.newPhotos.length;
+    box.innerHTML = '<div class="g2" style="grid-template-columns:repeat(' + (o ? 3 : 2) + ',minmax(0,1fr));margin-top:6px">' +
+      '<button class="chip" id="a-ordo" style="min-height:40px;font-size:14px;padding:0 6px;white-space:nowrap">📄 ' + (o ? 'Ordo ✓' : 'Ordonnance') + '</button>' +
+      (o ? '<button class="chip on" id="a-apply" style="min-height:42px;font-size:14px;padding:0 6px">Appliquer</button>' : '') +
+      '<button class="chip' + (nPh ? ' on' : '') + '" id="a-photo" style="min-height:40px;font-size:14px;padding:0 6px;white-space:nowrap">📷 Photo' + (nPh ? ' (' + nPh + ')' : '') + '</button></div>';
+    $('#a-ordo').onclick = () => {
+      syncDraft();
+      if (!D.patientName.trim()) return toast('Choisis d’abord le patient');
+      const pid = ensureDraftPatient();
+      ordoMenu(pid, () => { save(); drawSugg(); drawTools(); });
+    };
+    const ap = $('#a-apply'); if (ap) ap.onclick = () => {
+      syncDraft();
+      D.acts = JSON.parse(JSON.stringify(o.acts)); D.unknown = [];
+      drawAjout();
+      toast(o.end && o.end < D.start ? 'Attention : ordonnance terminée le ' + dateCourt(o.end) : 'Soins de l’ordonnance appliqués');
+    };
+    $('#a-photo').onclick = () => { syncDraft(); nPh ? draftPhotosSheet() : addDraftPhoto(); };
+  }
+  function addDraftPhoto() {
+    pickImage(async f => {
+      try { const b = await compressImage(f, 1400, 0.72); UI.draft.newPhotos.push({ tmp: uid(), blob: b, url: URL.createObjectURL(b) }); drawTools(); toast('Photo ajoutée'); }
+      catch (e) { toast('Photo illisible'); }
+    });
+  }
+  function draftPhotosSheet() {
+    const D = UI.draft;
+    const thumbs = D.photoIds.map(id => '<div style="position:relative"><img data-pid="' + id + '" alt="" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:#dde7ee;display:block"><button class="icon-btn" data-rmo="' + id + '" aria-label="Retirer" style="position:absolute;top:4px;right:4px;width:34px;height:34px;background:rgba(255,255,255,.9)">✕</button></div>').join('') +
+      D.newPhotos.map(x => '<div style="position:relative"><img src="' + x.url + '" alt="" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;display:block"><button class="icon-btn" data-rmn="' + x.tmp + '" aria-label="Retirer" style="position:absolute;top:4px;right:4px;width:34px;height:34px;background:rgba(255,255,255,.9)">✕</button></div>').join('');
+    sheet('<h2>Photos du soin</h2><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">' + thumbs + '</div><div class="btns"><button class="btn ghost" data-close>Fermer</button><button class="btn accent" id="dp-add">📷 Ajouter</button></div>',
+      (m, close) => {
+        fillThumbs(m);
+        $('#dp-add', m).onclick = () => { close(); addDraftPhoto(); };
+        $$('[data-rmo]', m).forEach(b => b.onclick = () => { D.photoIds = D.photoIds.filter(x => x !== b.dataset.rmo); (D.removedPhotos = D.removedPhotos || []).push(b.dataset.rmo); close(); drawTools(); });
+        $$('[data-rmn]', m).forEach(b => b.onclick = () => { D.newPhotos = D.newPhotos.filter(x => x.tmp !== b.dataset.rmn); close(); drawTools(); });
+      });
+  }
+  async function commitDraftPhotos(pid, date) {
+    const D = UI.draft; const ids = D.photoIds.slice();
+    for (const x of D.newPhotos) { const id = uid(); try { await IDB.put({ id, patientId: pid, date, kind: 'soin', blob: x.blob }); ids.push(id); } catch (e) { toast('Photo non enregistrée (mémoire pleine ?)'); } }
+    if (D.removedPhotos) await delPhotos(D.removedPhotos);
+    D.newPhotos = []; return ids;
   }
   function syncDraft() {
     const D = UI.draft;
@@ -650,7 +708,7 @@
     $$('[data-minus]').forEach(b => b.onclick = () => { syncDraft(); const i = +b.dataset.minus; D.acts[i].qty--; if (D.acts[i].qty <= 0) D.acts.splice(i, 1); drawAjout(); });
     $$('[data-plus]').forEach(b => b.onclick = () => { syncDraft(); const i = +b.dataset.plus; D.acts[i].qty = Math.min(9, D.acts[i].qty + 1); drawAjout(); });
     $('#a-addact').onclick = () => { syncDraft(); pickAct(); };
-    $('#a-pat').oninput = () => { D.patientName = $('#a-pat').value; D.patientId = null; drawSugg(); drawPreview(); };
+    $('#a-pat').oninput = () => { D.patientName = $('#a-pat').value; const had = D.patientId; D.patientId = null; drawSugg(); if (had && !D.patientId) drawTools(); drawPreview(); };
     $('#a-rep').onclick = () => { syncDraft(); if (D.rec.type === 'once') { D.rec.type = 'daily'; D.dimanche = true; } else { D.rec.type = 'once'; D.end = ''; D.dimanche = E.isDimancheOuFerie(D.start); } drawAjout(); };
     $$('[data-rec]').forEach(b => b.onclick = () => { syncDraft(); D.rec.type = b.dataset.rec; if (b.dataset.rec === 'weekdays' && !(D.rec.days || []).length) D.rec.days = [1, 2, 3, 4, 5]; drawAjout(); });
     $$('[data-day]').forEach(b => b.onclick = () => { syncDraft(); const d = +b.dataset.day; D.rec.days = (D.rec.days || []).includes(d) ? D.rec.days.filter(x => x !== d) : (D.rec.days || []).concat(d); drawAjout(); });
@@ -705,9 +763,9 @@
     const qv = norm(D.patientName).trim();
     const list = S.patients.filter(p => p.cabinetId === D.cabinetId && (!qv || norm(p.nom).includes(qv)));
     const exact = S.patients.find(p => p.cabinetId === D.cabinetId && norm(p.nom) === qv);
-    if (exact) D.patientId = exact.id;
+    if (exact && D.patientId !== exact.id) { D.patientId = exact.id; setTimeout(drawTools, 0); }
     box.innerHTML = (!D.patientId && qv && list.length) ? '<div class="sugg">' + list.slice(0, 5).map(p => '<button data-sp="' + p.id + '">' + esc(p.nom) + '<span class="note"> — ' + esc(badges(p)) + '</span></button>').join('') + '</div>' : '';
-    $$('[data-sp]', box).forEach(b => b.onclick = () => { syncDraft(); const p = pat(b.dataset.sp); D.patientId = p.id; D.patientName = p.nom; $('#a-pat').value = p.nom; drawSugg(); drawPreview(); });
+    $$('[data-sp]', box).forEach(b => b.onclick = () => { syncDraft(); const p = pat(b.dataset.sp); D.patientId = p.id; D.patientName = p.nom; $('#a-pat').value = p.nom; drawSugg(); drawTools(); drawPreview(); });
     if (!D.patientId && qv) {
       np.innerHTML = '<div class="newp"><span class="note" style="flex:1"><b>Nouveau patient</b></span><select class="in sm" id="np-bsi" aria-label="Forfait dépendance" style="width:auto;min-height:40px">' +
         ['', 'BSA', 'BSB', 'BSC'].map(x => '<option value="' + x + '"' + ((D.newP.bsi || '') === x ? ' selected' : '') + '>' + (x || 'Sans BSI') + '</option>').join('') + '</select>' +
@@ -774,7 +832,9 @@
     viewAjout({ date, cabinet: D.cabinetId });
     if (UI.mapsPrompt === pid && p && p.adresse) { UI.mapsPrompt = null; mapsSheet(p); }
   }
-  function saveSoin(fromAbsent) {
+  async function saveSoin(fromAbsent) {
+    if (UI.saving) return;
+    UI.saving = true; setTimeout(() => { UI.saving = false; }, 1500);
     if (fromAbsent !== true) syncDraft();
     const D = UI.draft;
     if (!D.acts.length) return toast('Ajoute au moins un acte');
@@ -785,6 +845,7 @@
     const lvAct = D.acts.map(a => E.ACTS[a.id] && E.ACTS[a.id].niveau).filter(Boolean).sort().pop();
     if (lvAct && !pat(pid).bsi) pat(pid).bsi = lvAct;
     const data = { patientId: pid, heure: D.heure || nowHM(), acts: D.acts, rec: D.rec, start: D.start || today(), end: D.rec.type === 'once' ? '' : (D.end || ''), dimanche: D.dimanche, nuit: false };
+    data.photos = await commitDraftPhotos(pid, data.start);
     if (D.id) { Object.assign(S.soins.find(s => s.id === D.id), data); save(); toast('Soin modifié'); location.hash = '#patient/' + pid; return; }
     S.soins.push(Object.assign({ id: uid() }, data));
     afterSave(pid, data.start, fromAbsent === true ? 'Absent noté (facturé)' : 'Enregistré pour ' + pat(pid).nom);
@@ -1097,7 +1158,7 @@
     $('#r-file').onchange = e => { const f = e.target.files[0]; if (f) importBackup(f); e.target.value = ''; };
     $('#r-csv').onclick = () => $('#r-csvfile').click();
     $('#r-csvfile').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (f) importCsv(await f.text()); };
-    $('#r-wipe').onclick = () => confirmBox('Effacer toutes les données de l’appli ?', 'Tout effacer', () => { const k = S.apiKey; S = blank(); S.apiKey = k; save(); location.hash = '#mois'; route(); });
+    $('#r-wipe').onclick = () => confirmBox('Effacer toutes les données de l’appli ?', 'Tout effacer', () => { IDB.clear().catch(() => {}); const k = S.apiKey; S = blank(); S.apiKey = k; save(); location.hash = '#mois'; route(); });
   }
   function viewTarifs() {
     const T = S.tarifs;
@@ -1241,6 +1302,224 @@
     });
   }
 
+  // ---------- Photos (stockées dans l'appli, sur le téléphone uniquement) ----------
+  const IDB = (() => {
+    let dbp = null;
+    const open = () => dbp || (dbp = new Promise((res, rej) => {
+      const r = indexedDB.open('soeuringue_photos', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('photos', { keyPath: 'id' });
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    }));
+    const run = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => { const t = db.transaction('photos', mode); const req = fn(t.objectStore('photos')); t.oncomplete = () => res(req && req.result); t.onerror = () => rej(t.error); }); };
+    return { put: p => run('readwrite', s => s.put(p)), get: id => run('readonly', s => s.get(id)), del: id => run('readwrite', s => s.delete(id)), all: () => run('readonly', s => s.getAll()), clear: () => run('readwrite', s => s.clear()) };
+  })();
+  function compressImage(file, maxSide, q) {
+    return new Promise((res, rej) => {
+      const url = URL.createObjectURL(file); const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+        const cv = document.createElement('canvas'); cv.width = Math.round(img.naturalWidth * k); cv.height = Math.round(img.naturalHeight * k);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url);
+        cv.toBlob(b => b ? res(b) : rej(new Error('image illisible')), 'image/jpeg', q);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('image illisible')); };
+      img.src = url;
+    });
+  }
+  function pickImage(cb) {
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none';
+    inp.onchange = () => { const f = inp.files[0]; inp.remove(); if (f) cb(f); };
+    document.body.appendChild(inp); inp.click();
+  }
+  async function delPhotos(ids) { for (const id of ids || []) { try { await IDB.del(id); } catch (e) {} } }
+  const blobUrls = new Map();
+  async function photoUrl(id) { if (blobUrls.has(id)) return blobUrls.get(id); const r = await IDB.get(id); if (!r) return ''; const u = URL.createObjectURL(r.blob); blobUrls.set(id, u); return u; }
+  async function fillThumbs(root) { for (const im of $$('img[data-pid]', root)) { const u = await photoUrl(im.dataset.pid); if (u) im.src = u; } }
+  function viewPhoto(src, label) {
+    sheet('<h2>' + esc(label || '') + '</h2><img src="' + src + '" alt="" style="width:100%;border-radius:14px;display:block"><div class="btns"><button class="btn" data-close>Fermer</button></div>');
+  }
+  function patientPhotos(pid) {
+    const items = [];
+    S.soins.filter(s => s.patientId === pid && (s.photos || []).length).forEach(s => s.photos.forEach(id => items.push({ id, date: s.start })));
+    items.sort((a, b) => a.date.localeCompare(b.date));
+    return items;
+  }
+  function photosSheet(pid) {
+    const items = patientPhotos(pid); const p = pat(pid);
+    const j0 = items.length ? items[0].date : null;
+    const jl = d => 'J' + (Math.round((E.parseIso(d) - E.parseIso(j0)) / 86400000) + 1);
+    let h = '<h2>Photos — ' + esc(p.nom) + '</h2>';
+    h += items.length ? '<p class="note">J1 = première photo (' + esc(dateFr(j0)) + '). Touche une photo pour l’agrandir.</p><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">' +
+      items.slice().reverse().map(x => '<button class="back" data-big="' + x.id + '" data-lab="' + esc(jl(x.date) + ' · ' + dateFr(x.date)) + '" style="display:block;padding:0;min-height:0"><img data-pid="' + x.id + '" alt="Photo du ' + esc(dateFr(x.date)) + '" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:#dde7ee;display:block"><span class="note" style="font-size:12px">' + jl(x.date) + ' · ' + esc(dateCourt(x.date).slice(0, 5)) + '</span></button>').join('') + '</div>'
+      : '<p class="note">Aucune photo. Ajoute-les avec 📷 sur l’écran du passage.</p>';
+    h += '<div class="btns"><button class="btn" data-close>Fermer</button></div>';
+    sheet(h, m => { fillThumbs(m); $$('[data-big]', m).forEach(b => b.onclick = async () => viewPhoto(await photoUrl(b.dataset.big), b.dataset.lab)); });
+  }
+
+  // ---------- Ordonnance : lecture locale, puis IA si besoin (avec accord) ----------
+  let ocrWorker = null;
+  function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('chargement impossible')); document.head.appendChild(s); }); }
+  async function ocrImage(blob, onProgress) {
+    if (!window.Tesseract) await loadScript('tesseract.min.js');
+    if (!ocrWorker) {
+      const base = new URL('./', location.href).href;
+      ocrWorker = await Tesseract.createWorker('fra', 1, { workerPath: base + 'worker.min.js', corePath: base, langPath: base, workerBlobURL: false, logger: m => onProgress && onProgress(m) });
+    }
+    const r = await ocrWorker.recognize(blob);
+    return { text: r.data.text || '', conf: r.data.confidence || 0 };
+  }
+  const JOURS_MOTS = { dimanche: 0, lundi: 1, mardi: 2, mercredi: 3, jeudi: 4, vendredi: 5, samedi: 6 };
+  function parseOrdonnance(text) {
+    const t = norm(text);
+    const acts = [];
+    t.split(/\n/).forEach(line => {
+      if (/docteur|\bdr\b|rpps|adeli|finess|\btel\b|telephone|ne\(e\) le|nee? le|n° ss|securite sociale|cabinet medical|@/.test(line)) return;
+      line.split(/\+|,|;|\bet\b|\bpuis\b/).map(s => s.trim()).filter(s => s.length > 2).forEach(seg => {
+        let id = null;
+        for (const [re, v] of RULES) if (re.test(seg)) { id = v; break; }
+        if (id === 'HORS' || !id) return;
+        if (id === 'FILS') id = /plus de 10|> ?10|\b(1[1-9]|[2-9]\d) (fils|agrafes)/.test(seg) ? 'ablation_fils_plus' : 'ablation_fils';
+        if (!acts.some(a => a.id === id)) acts.push({ id, qty: 1 });
+      });
+    });
+    let rec = { type: 'daily', days: [1, 2, 3, 4, 5] }, recTrouvee = false;
+    const nb = t.match(/(\d|deux|trois|quatre|cinq) ?(fois|x) ?(par|\/) ?sem/);
+    const joursCites = Object.keys(JOURS_MOTS).filter(j => j !== 'dimanche' && new RegExp('\\b' + j + 's?\\b').test(t)).map(j => JOURS_MOTS[j]);
+    if (/tous les jours|chaque jour|quotidien|1 ?(fois|x) ?(par|\/) ?j|7 ?j ?\/ ?7|matin et soir|(2|deux|3|trois) fois par jour/.test(t)) { rec = { type: 'daily' }; recTrouvee = true; }
+    else if (/tous les (2|deux) jours|1 jour sur 2|un jour sur deux|jour sur deux/.test(t)) { rec = { type: 'every2' }; recTrouvee = true; }
+    else if (joursCites.length >= 1 && /\ble[s]? (lundi|mardi|mercredi|jeudi|vendredi|samedi)/.test(t)) { rec = { type: 'weekdays', days: joursCites }; recTrouvee = true; }
+    else if (nb) { const n = { deux: 2, trois: 3, quatre: 4, cinq: 5 }[nb[1]] || +nb[1]; rec = { type: 'weekdays', days: [[3], [1, 4], [1, 3, 5], [1, 2, 4, 5], [1, 2, 3, 4, 5]][Math.min(5, n) - 1] || [1] }; recTrouvee = true; }
+
+    const dimanche = /dimanche|feri|7 ?j ?\/ ?7|7 jours sur 7/.test(t);
+    let duree = 0;
+    const md = t.match(/(pendant|durant|duree( de)?( du traitement)?|x)\s*:?\s*(\d+)\s*(jours|jour|j\b|semaines|semaine|sem|mois)/);
+    if (md) { const n = +md[4]; duree = /sem/.test(md[5]) ? n * 7 : /mois/.test(md[5]) ? n * 30 : n; }
+    else if (/jusqu.?a cicatrisation/.test(t)) duree = 90;
+    const passages = /matin,? midi et soir|(3|trois) fois par jour/.test(t) ? 3 : /matin et soir|(2|deux) fois par jour/.test(t) ? 2 : 1;
+    const md2 = t.match(/\b(\d{1,2})[\/.](\d{1,2})[\/.](20\d{2}|\d{2})\b/);
+    let datePresc = '';
+    if (md2) { const y = md2[3].length === 2 ? '20' + md2[3] : md2[3]; const s = y + '-' + String(md2[2]).padStart(2, '0') + '-' + String(md2[1]).padStart(2, '0'); if (!isNaN(E.parseIso(s))) datePresc = s; }
+    return { acts, rec, recTrouvee, dimanche, duree, passages, datePresc };
+  }
+  async function blobToB64(blob) { const buf = await blob.arrayBuffer(); let s = ''; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }
+  async function ordoAI(blob) {
+    const list = Object.entries(E.ACTS).filter(([k]) => k !== 'manuel').map(([k, v]) => k + ' : ' + v.l).join('\n');
+    const small = await compressImage(blob, 1568, 0.8);
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': S.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: S.aiModel || 'claude-haiku-5-5', max_tokens: 600,
+        system: "Tu lis une ordonnance de soins infirmiers (photo, parfois manuscrite). Ne recopie jamais le nom, la date de naissance ni l'identité du patient ou du médecin. Réponds UNIQUEMENT avec un JSON : {\"actes\":[{\"id\":\"...\"}],\"frequence\":\"daily|every2|weekdays|once\",\"jours\":[1,3,5],\"dimanche\":true,\"duree_jours\":10,\"passages_par_jour\":1}. jours : 0=dimanche…6=samedi, seulement si frequence=weekdays. N'utilise que les id du catalogue :\n" + list,
+        messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await blobToB64(small) } }, { type: 'text', text: 'Lis cette ordonnance et réponds avec le JSON.' }] }] })
+    });
+    if (!res.ok) throw new Error('Erreur ' + res.status + (res.status === 401 ? ' : clé API refusée' : ''));
+    const data = await res.json(); const out = (data.content || []).map(c => c.text || '').join('');
+    const j = JSON.parse(out.slice(out.indexOf('{'), out.lastIndexOf('}') + 1));
+    const acts = []; (j.actes || []).forEach(a => { if (E.ACTS[a.id] && a.id !== 'manuel' && !acts.some(x => x.id === a.id)) acts.push({ id: a.id, qty: 1 }); });
+    const type = ['daily', 'every2', 'weekdays', 'once'].includes(j.frequence) ? j.frequence : 'daily';
+    return { acts, rec: { type, days: (j.jours || []).filter(d => d >= 0 && d <= 6) }, recTrouvee: true, dimanche: !!j.dimanche, duree: +j.duree_jours || 0, passages: +j.passages_par_jour || 1, datePresc: '' };
+  }
+  function ordoResume(o) {
+    const r = o.rec || {};
+    const freq = r.type === 'every2' ? 'tous les 2 jours' : r.type === 'weekdays' ? 'les ' + JOURS_ORDRE.filter(d => (r.days || []).includes(d)).map(d => JOURS_LONG[d]).join(' ') : r.type === 'once' ? 'une fois' : 'tous les jours';
+    return actsText(o.acts) + ' · ' + freq + (o.passages > 1 ? ' · ' + o.passages + ' passages/jour' : '') + (o.dimanche ? ' · dim./fériés' : '') + (o.end ? ' · jusqu’au ' + dateCourt(o.end) : '');
+  }
+  function ordoMenu(pid, done) {
+    const p = pat(pid); const o = p.ordo;
+    if (!o) return ordoScan(pid, done);
+    const expired = o.end && o.end < today();
+    sheet('<h2>Ordonnance — ' + esc(p.nom) + '</h2>' + (o.photoId ? '<img data-pid="' + o.photoId + '" alt="Photo de l’ordonnance" style="width:100%;max-height:260px;object-fit:contain;border-radius:12px;background:#dde7ee;display:block;margin-bottom:10px">' : '') +
+      '<div class="card" style="padding:12px 14px"><div class="note" style="font-size:12px">Enregistrée le ' + esc(dateCourt(o.date)) + (expired ? ' · <b style="color:var(--warn)">terminée</b>' : '') + '</div><div style="margin-top:4px;line-height:1.4">' + esc(ordoResume(o)) + '</div></div>' +
+      '<div class="btns"><button class="btn ghost" id="om-edit">Corriger</button><button class="btn ghost" id="om-new">Nouvelle</button></div><div class="btns" style="margin-top:0"><button class="btn danger" id="om-del">Supprimer</button><button class="btn" data-close>Fermer</button></div>',
+      (m, close) => {
+        fillThumbs(m);
+        const im = $('img[data-pid]', m); if (im) im.onclick = async () => viewPhoto(await photoUrl(o.photoId), 'Ordonnance');
+        $('#om-edit', m).onclick = () => { close(); ordoReview(pid, JSON.parse(JSON.stringify(o)), null, done); };
+        $('#om-new', m).onclick = () => { close(); ordoScan(pid, done); };
+        $('#om-del', m).onclick = () => confirmBox('Supprimer l’ordonnance de ' + p.nom + ' ?', 'Supprimer', async () => { await delPhotos([o.photoId]); delete p.ordo; save(); close(); done && done(); });
+      });
+  }
+  function ordoScan(pid, done) {
+    pickImage(async file => {
+      let closeWait = null;
+      sheet('<h2>Lecture de l’ordonnance…</h2><p class="note" id="ocr-st">Préparation (la première fois, ça prend quelques secondes).</p><div style="height:8px;background:#dde7ee;border-radius:4px;overflow:hidden"><div id="ocr-bar" style="height:100%;width:5%;background:var(--accent);transition:width .2s"></div></div><p class="note" style="margin-top:12px">Tout se passe sur le téléphone, rien n’est envoyé.</p>', (m, close) => { closeWait = close; });
+      let blob;
+      try { blob = await compressImage(file, 2200, 0.85); } catch (e) { closeWait && closeWait(); return toast('Photo illisible'); }
+      let parsed = null, conf = 0;
+      try {
+        const r = await ocrImage(blob, msg => {
+          const st = document.getElementById('ocr-st'), bar = document.getElementById('ocr-bar');
+          if (st && msg.status) st.textContent = msg.status === 'recognizing text' ? 'Lecture du texte…' : 'Préparation du lecteur…';
+          if (bar && msg.status === 'recognizing text') bar.style.width = Math.round(10 + 90 * (msg.progress || 0)) + '%';
+        });
+        conf = r.conf; parsed = parseOrdonnance(r.text);
+      } catch (e) { console.warn(e); }
+      closeWait && closeWait();
+      const lue = parsed && parsed.acts.length > 0 && conf >= 35;
+      if (lue) return ordoReview(pid, Object.assign(parsed, { source: 'locale' }), blob, done);
+      // Non lue : proposer l'IA, seulement avec accord
+      sheet('<h2>Ordonnance non lue</h2><p class="note">La lecture sur le téléphone n’a pas trouvé les soins (souvent une écriture à la main).</p>' +
+        (S.apiKey ? '<div class="unknown">Si tu l’envoies à l’IA, la photo part sur les serveurs d’Anthropic, avec le nom et les infos du patient qui y figurent.</div><div class="btns"><button class="btn ghost" id="on-man">Saisir à la main</button><button class="btn accent" id="on-ai">Envoyer à l’IA</button></div>'
+          : '<p class="note">Pour la lecture par l’IA, ajoute une clé API dans Réglages.</p><div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="on-man">Saisir à la main</button></div>'),
+        (m, close) => {
+          $('#on-man', m).onclick = () => { close(); ordoReview(pid, Object.assign(parsed || { acts: [], rec: { type: 'daily' }, dimanche: false, duree: 0, passages: 1 }, { source: 'main' }), blob, done); };
+          const ai = $('#on-ai', m);
+          if (ai) ai.onclick = async () => {
+            if (!navigator.onLine) return toast('Pas de réseau');
+            ai.disabled = true; ai.textContent = 'L’IA lit…';
+            try { const r = await ordoAI(blob); close(); ordoReview(pid, Object.assign(r, { source: 'ia' }), blob, done); }
+            catch (e) { ai.disabled = false; ai.textContent = 'Réessayer'; toast('IA : ' + e.message.slice(0, 80)); }
+          };
+        });
+    });
+  }
+  function ordoReview(pid, o, blob, done) {
+    const p = pat(pid);
+    o.start = o.start || o.datePresc || today();
+    if (!o.end && o.duree) o.end = E.addDays(o.start, o.duree - 1);
+    o.rec = o.rec || { type: 'daily' };
+    const draw = (m) => {
+      const sh = $('.sheet', m);
+      const r = o.rec;
+      let h = '<h2>Vérifie l’ordonnance</h2><p class="note">' + esc(p.nom) + (o.source === 'ia' ? ' · lue par l’IA' : o.source === 'locale' ? ' · lue sur le téléphone' : '') + '. Corrige si besoin.</p>';
+      h += '<div class="section" style="margin-top:6px">Soins prescrits</div>';
+      h += o.acts.length ? o.acts.map((a, i) => '<div class="act sm"><span class="n">' + esc(E.actLabel(a)) + '</span><button class="icon-btn" data-rm="' + i + '" aria-label="Retirer">✕</button></div>').join('') : '<p class="note">Aucun soin trouvé.</p>';
+      h += '<button class="back" id="or-add" style="min-height:40px">+ Ajouter un soin</button>';
+      h += '<div class="section">Fréquence</div><div class="chips">' + [['daily', 'Tous les jours'], ['every2', 'Tous les 2 j'], ['weekdays', 'Certains jours'], ['once', 'Une fois']].map(([k, l]) => '<button class="chip' + (r.type === k ? ' on' : '') + '" data-rt="' + k + '" style="min-height:40px">' + l + '</button>').join('') + '</div>';
+      if (r.type === 'weekdays') h += '<div class="days">' + JOURS_ORDRE.map(d => '<button class="chip' + ((r.days || []).includes(d) ? ' on' : '') + '" data-dd="' + d + '" aria-label="' + JOURS_LONG[d] + '">' + JOURS[d] + '</button>').join('') + '</div>';
+      h += '<div class="g2" style="grid-template-columns:1fr 1fr;margin-top:10px"><div><label class="f" for="or-s" style="margin-top:0">Début</label><input class="in sm" type="date" id="or-s" value="' + esc(o.start) + '"></div><div><label class="f" for="or-e" style="margin-top:0">Fin</label><input class="in sm" type="date" id="or-e" value="' + esc(o.end || '') + '"></div></div>';
+      h += '<label class="chk sm"><span>Dimanches et fériés</span><input type="checkbox" id="or-dim"' + (o.dimanche ? ' checked' : '') + '></label>';
+      h += '<label class="chk sm"><span>Passages par jour</span><select class="in sm" id="or-pj" style="width:auto;min-height:40px">' + [1, 2, 3, 4].map(n => '<option' + (o.passages === n ? ' selected' : '') + '>' + n + '</option>').join('') + '</select></label>';
+      h += '<div class="btns"><button class="btn ghost" id="or-cancel">Annuler</button><button class="btn accent" id="or-ok">Enregistrer</button></div>';
+      sh.innerHTML = h;
+      const sync = () => { o.start = $('#or-s', sh).value || o.start; o.end = $('#or-e', sh).value; o.dimanche = $('#or-dim', sh).checked; o.passages = +$('#or-pj', sh).value; };
+      $$('[data-rm]', sh).forEach(b => b.onclick = () => { sync(); o.acts.splice(+b.dataset.rm, 1); draw(m); });
+      $$('[data-rt]', sh).forEach(b => b.onclick = () => { sync(); o.rec = { type: b.dataset.rt, days: o.rec.days && o.rec.days.length ? o.rec.days : [1, 2, 3, 4, 5] }; draw(m); });
+      $$('[data-dd]', sh).forEach(b => b.onclick = () => { sync(); const d = +b.dataset.dd; o.rec.days = (o.rec.days || []).includes(d) ? o.rec.days.filter(x => x !== d) : (o.rec.days || []).concat(d); draw(m); });
+      $('#or-add', sh).onclick = () => { sync(); pickActTo(id => { if (!o.acts.some(a => a.id === id)) o.acts.push({ id, qty: 1 }); draw(m); }); };
+      $('#or-cancel', sh).onclick = () => m.remove();
+      $('#or-ok', sh).onclick = async () => {
+        sync();
+        if (!o.acts.length) return toast('Ajoute au moins un soin');
+        let photoId = (p.ordo && p.ordo.photoId) || null;
+        if (blob) { if (photoId) await delPhotos([photoId]); photoId = uid(); await IDB.put({ id: photoId, patientId: pid, date: today(), kind: 'ordo', blob }); }
+        p.ordo = { date: today(), photoId, acts: o.acts, rec: o.rec, start: o.start, end: o.end, dimanche: o.dimanche, passages: o.passages, source: o.source };
+        save(); m.remove(); toast('Ordonnance enregistrée'); done && done();
+      };
+    };
+    const m = document.createElement('div'); m.className = 'modal';
+    m.innerHTML = '<div class="sheet" role="dialog" aria-modal="true"></div>'; document.body.appendChild(m);
+    draw(m);
+  }
+  function pickActTo(cb) {
+    const groups = {};
+    Object.entries(E.ACTS).forEach(([k, v]) => { if (k !== 'manuel') (groups[v.g] = groups[v.g] || []).push([k, v]); });
+    let h = '<h2>Ajouter un soin</h2>';
+    Object.entries(groups).forEach(([g, items]) => { h += '<div class="section">' + esc(g) + '</div><div class="list">' + items.map(([k, v]) => '<button class="item" data-pk="' + k + '"><span class="t" style="font-weight:600">' + esc(v.l) + '</span></button>').join('') + '</div>'; });
+    h += '<button class="btn" data-close>Fermer</button>';
+    sheet(h, (m, close) => $$('[data-pk]', m).forEach(b => b.onclick = () => { close(); cb(b.dataset.pk); }));
+  }
+
   // ---------- sauvegarde chiffrée ----------
   const enc = new TextEncoder(), dec = new TextDecoder();
   const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -1249,21 +1528,23 @@
     const base = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
     return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 250000, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
   }
-  function askPass(title, confirm2, cb) {
+  function askPass(title, confirm2, cb, withPhotos) {
     sheet('<h2>' + esc(title) + '</h2><p class="note">Ce mot de passe protège les noms des patients. Sans lui, la sauvegarde est illisible : note-le bien.</p>' +
       '<label class="f" for="pp1">Mot de passe</label><input class="in" type="password" id="pp1" autocomplete="new-password">' +
       (confirm2 ? '<label class="f" for="pp2">Confirmer</label><input class="in" type="password" id="pp2" autocomplete="new-password">' : '') +
+      (withPhotos ? '<label class="chk"><span>Inclure les photos (fichier plus lourd)</span><input type="checkbox" id="pp-ph" checked></label>' : '') +
       '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="pp-ok">Continuer</button></div>',
       (m, close) => $('#pp-ok', m).onclick = () => {
         const a = $('#pp1', m).value; if (a.length < 6) return toast('6 caractères minimum');
         if (confirm2 && a !== $('#pp2', m).value) return toast('Les deux mots de passe sont différents');
-        close(); cb(a);
+        const ph = $('#pp-ph', m); close(); cb(a, ph ? ph.checked : false);
       });
   }
   function exportBackup() {
-    askPass('Sauvegarde chiffrée', true, async pass => {
+    askPass('Sauvegarde chiffrée', true, async (pass, withPh) => {
       try {
         const data = Object.assign({}, S); delete data.apiKey;
+        if (withPh) { const all = await IDB.all(); data._photos = []; for (const x of all) data._photos.push({ id: x.id, patientId: x.patientId, date: x.date, kind: x.kind, b64: await blobToB64(x.blob) }); }
         const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
         const key = await keyFrom(pass, salt);
         const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(data)));
@@ -1274,7 +1555,7 @@
         else { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
         toast('Sauvegarde créée');
       } catch (e) { if (e.name !== 'AbortError') toast('Sauvegarde impossible : ' + e.message); }
-    });
+    }, true);
   }
   function importBackup(f) {
     askPass('Restaurer une sauvegarde', false, async pass => {
@@ -1285,7 +1566,10 @@
         const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(j.iv) }, key, unb64(j.data));
         const data = JSON.parse(dec.decode(pt));
         confirmBox('Remplacer les données actuelles par cette sauvegarde ?', 'Remplacer', () => {
-          const k = S.apiKey; S = Object.assign(blank(), data); S.apiKey = k; save(); toast('Sauvegarde restaurée'); location.hash = '#mois'; route();
+          const phs = data._photos; delete data._photos;
+          const k = S.apiKey; S = Object.assign(blank(), data); S.apiKey = k; save();
+          if (phs) (async () => { await IDB.clear(); for (const x of phs) { const bin = unb64(x.b64); await IDB.put({ id: x.id, patientId: x.patientId, date: x.date, kind: x.kind, blob: new Blob([bin], { type: 'image/jpeg' }) }); } toast(phs.length + ' photo(s) restaurée(s)'); })();
+          toast('Sauvegarde restaurée'); location.hash = '#mois'; route();
         });
       } catch (e) { toast(e.name === 'OperationError' ? 'Mot de passe incorrect' : 'Restauration impossible : ' + e.message); }
     });
