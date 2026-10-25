@@ -292,6 +292,8 @@
       '<label class="f" for="c-tit">Nom de la titulaire</label><input class="in" id="c-tit" value="' + esc(c.titulaire || '') + '" autocomplete="off" autocapitalize="words">' +
       '<label class="f" for="c-tel">Téléphone de la titulaire</label><input class="in" id="c-tel" type="tel" value="' + esc(c.tel || '') + '" autocomplete="off">' +
       '<label class="f" for="c-retro">Rétrocession au titulaire (%)</label><input class="in" id="c-retro" type="number" inputmode="decimal" min="0" max="100" step="0.5" value="' + esc(c.retro) + '">' +
+      '<label class="f" for="c-env">Envoi des ordonnances (WhatsApp)</label><select class="in" id="c-env"><option value="titulaire"' + ((c.envoi || {}).type !== 'groupe' ? ' selected' : '') + '>À la titulaire</option><option value="groupe"' + ((c.envoi || {}).type === 'groupe' ? ' selected' : '') + '>À un groupe</option></select>' +
+      '<div class="g2" style="grid-template-columns:1.4fr 1fr"><input class="in" id="c-grp" placeholder="Nom du groupe" value="' + esc((c.envoi || {}).groupe || '') + '" autocomplete="off" style="margin-top:8px"><select class="in" id="c-fmt" style="margin-top:8px" aria-label="Format"><option value="pdf"' + ((c.envoi || {}).format !== 'photo' ? ' selected' : '') + '>En PDF</option><option value="photo"' + ((c.envoi || {}).format === 'photo' ? ' selected' : '') + '>En photo</option></select></div>' +
       '<label class="f" for="c-court">Nom court dans le planning</label><input class="in" id="c-court" value="' + esc(c.court || '') + '" placeholder="ex : 93, Rosa…" autocomplete="off" maxlength="12">' +
       '<label class="f">Couleur</label><div style="display:flex;flex-wrap:wrap;gap:8px" id="c-cols">' + CAB_COLORS.map(x => '<button class="colsw" data-col="' + x + '" aria-label="Couleur ' + x + '" style="background:' + x + '"></button>').join('') + '</div>' +
       '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="c-ok">Enregistrer</button></div>' +
@@ -302,7 +304,7 @@
         $('#c-ok', m).onclick = () => {
           const nom = $('#c-nom', m).value.trim(); if (!nom) return toast('Donne un nom au cabinet');
           const retro = parseFloat(String($('#c-retro', m).value).replace(',', '.')) || 0;
-          const extra = { titulaire: $('#c-tit', m).value.trim(), tel: $('#c-tel', m).value.trim(), court: $('#c-court', m).value.trim(), color: col };
+          const extra = { titulaire: $('#c-tit', m).value.trim(), tel: $('#c-tel', m).value.trim(), court: $('#c-court', m).value.trim(), color: col, envoi: { type: $('#c-env', m).value, groupe: $('#c-grp', m).value.trim(), format: $('#c-fmt', m).value } };
           let created = null;
           if (id) Object.assign(c, { nom, retro }, extra); else { created = Object.assign({ id: uid(), nom, retro }, extra); S.cabinets.push(created); }
           save(); close(); route();
@@ -1543,6 +1545,178 @@
     sheet(h, m => { fillThumbs(m); $$('[data-big]', m).forEach(b => b.onclick = async () => viewPhoto(await photoUrl(b.dataset.big), b.dataset.lab)); });
   }
 
+  // ---------- Effet scanner : recadrage 4 coins, redressement, filtre ----------
+  function loadImg(blob) { return new Promise((res, rej) => { const u = URL.createObjectURL(blob); const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('image illisible')); im.src = u; }); }
+  function detectCorners(img) {
+    const S0 = 240; const k = S0 / Math.max(img.naturalWidth, img.naturalHeight);
+    const w = Math.max(8, Math.round(img.naturalWidth * k)), h = Math.max(8, Math.round(img.naturalHeight * k));
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const cx = cv.getContext('2d', { willReadFrequently: true });
+    cx.drawImage(img, 0, 0, w, h); const d = cx.getImageData(0, 0, w, h).data;
+    const g = new Uint8Array(w * h); const hist = new Array(256).fill(0);
+    for (let i = 0; i < w * h; i++) { const v = (d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11) | 0; g[i] = v; hist[v]++; }
+    // seuil d'Otsu
+    let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+    let sB = 0, wB = 0, best = 0, th = 128;
+    for (let t = 0; t < 256; t++) { wB += hist[t]; if (!wB) continue; const wF = w * h - wB; if (!wF) break; sB += t * hist[t]; const mB = sB / wB, mF = (sum - sB) / wF; const v = wB * wF * (mB - mF) * (mB - mF); if (v > best) { best = v; th = t; } }
+    // plus grande zone claire (la feuille)
+    const lab = new Int32Array(w * h).fill(-1); let bestLab = -1, bestSize = 0; const st = [];
+    for (let i = 0; i < w * h; i++) {
+      if (g[i] <= th || lab[i] !== -1) continue;
+      let size = 0; st.push(i); lab[i] = i;
+      while (st.length) { const p = st.pop(); size++; const x = p % w, y = (p / w) | 0;
+        if (x > 0 && lab[p - 1] === -1 && g[p - 1] > th) { lab[p - 1] = i; st.push(p - 1); }
+        if (x < w - 1 && lab[p + 1] === -1 && g[p + 1] > th) { lab[p + 1] = i; st.push(p + 1); }
+        if (y > 0 && lab[p - w] === -1 && g[p - w] > th) { lab[p - w] = i; st.push(p - w); }
+        if (y < h - 1 && lab[p + w] === -1 && g[p + w] > th) { lab[p + w] = i; st.push(p + w); } }
+      if (size > bestSize) { bestSize = size; bestLab = i; }
+    }
+    const fallback = [[0.04, 0.04], [0.96, 0.04], [0.96, 0.96], [0.04, 0.96]].map(([a, b]) => [a * img.naturalWidth, b * img.naturalHeight]);
+    if (bestSize < w * h * 0.15 || bestSize > w * h * 0.985) return fallback;
+    let tl = [0, 0, Infinity], tr = [0, 0, -Infinity], br = [0, 0, -Infinity], bl = [0, 0, Infinity];
+    for (let p = 0; p < w * h; p++) { if (lab[p] !== bestLab) continue; const x = p % w, y = (p / w) | 0;
+      if (x + y < tl[2]) tl = [x, y, x + y]; if (x + y > br[2]) br = [x, y, x + y];
+      if (x - y > tr[2]) tr = [x, y, x - y]; if (x - y < bl[2]) bl = [x, y, x - y]; }
+    const pts = [tl, tr, br, bl].map(([x, y]) => [x / k, y / k]);
+    const mx = pts.reduce((a, p) => a + p[0], 0) / 4, my = pts.reduce((a, p) => a + p[1], 0) / 4;
+    return pts.map(([x, y]) => [x + (mx - x) * 0.012, y + (my - y) * 0.012]); // léger retrait pour ne pas garder le bord de la table
+  }
+  function homography(src, dst) { // matrice 3x3 qui envoie dst -> src
+    const A = [], b = [];
+    for (let i = 0; i < 4; i++) { const [x, y] = dst[i], [u, v] = src[i];
+      A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u); A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v); }
+    for (let c = 0; c < 8; c++) { let piv = c; for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
+      [A[c], A[piv]] = [A[piv], A[c]]; [b[c], b[piv]] = [b[piv], b[c]];
+      for (let r = 0; r < 8; r++) { if (r === c) continue; const f = A[r][c] / A[c][c]; for (let k = c; k < 8; k++) A[r][k] -= f * A[c][k]; b[r] -= f * b[c]; } }
+    const hh = b.map((v, i) => v / A[i][i]); return [...hh, 1];
+  }
+  async function renderScan(img, q, mode) {
+    const dist = (a, c) => Math.hypot(a[0] - c[0], a[1] - c[1]);
+    let W = Math.max(dist(q[0], q[1]), dist(q[3], q[2])), H = Math.max(dist(q[0], q[3]), dist(q[1], q[2]));
+    const sc = Math.min(1, 2000 / Math.max(W, H)); W = Math.round(W * sc); H = Math.round(H * sc);
+    const sk = Math.min(1, 2400 / Math.max(img.naturalWidth, img.naturalHeight));
+    const sw = Math.round(img.naturalWidth * sk), sh = Math.round(img.naturalHeight * sk);
+    const scv = document.createElement('canvas'); scv.width = sw; scv.height = sh; const sctx = scv.getContext('2d', { willReadFrequently: true });
+    sctx.drawImage(img, 0, 0, sw, sh); const sd = sctx.getImageData(0, 0, sw, sh).data;
+    const Hm = homography(q.map(([x, y]) => [x * sk, y * sk]), [[0, 0], [W, 0], [W, H], [0, H]]);
+    const out = document.createElement('canvas'); out.width = W; out.height = H; const octx = out.getContext('2d', { willReadFrequently: true });
+    const od = octx.createImageData(W, H); const o = od.data;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const z = Hm[6] * x + Hm[7] * y + 1; let u = (Hm[0] * x + Hm[1] * y + Hm[2]) / z, v = (Hm[3] * x + Hm[4] * y + Hm[5]) / z;
+      if (u < 0) u = 0; if (v < 0) v = 0; if (u > sw - 1.001) u = sw - 1.001; if (v > sh - 1.001) v = sh - 1.001;
+      const x0 = u | 0, y0 = v | 0, fx = u - x0, fy = v - y0, i00 = (y0 * sw + x0) * 4, i10 = i00 + 4, i01 = i00 + sw * 4, i11 = i01 + 4, oi = (y * W + x) * 4;
+      for (let c = 0; c < 3; c++) o[oi + c] = (sd[i00 + c] * (1 - fx) + sd[i10 + c] * fx) * (1 - fy) + (sd[i01 + c] * (1 - fx) + sd[i11 + c] * fx) * fy;
+      o[oi + 3] = 255;
+    }
+    if (mode !== 'original') {
+      // fond estimé (flou très large) pour blanchir le papier et effacer les ombres
+      const bw = Math.max(4, Math.round(W / 24)), bh = Math.max(4, Math.round(H / 24));
+      const tmp = document.createElement('canvas'); tmp.width = W; tmp.height = H; tmp.getContext('2d').putImageData(od, 0, 0);
+      const small = document.createElement('canvas'); small.width = bw; small.height = bh; const smx = small.getContext('2d', { willReadFrequently: true });
+      smx.filter = 'blur(2px)'; smx.drawImage(tmp, 0, 0, bw, bh);
+      const big = document.createElement('canvas'); big.width = W; big.height = H; const bgx = big.getContext('2d', { willReadFrequently: true });
+      bgx.imageSmoothingEnabled = true; bgx.drawImage(small, 0, 0, W, H); const bg = bgx.getImageData(0, 0, W, H).data;
+      for (let i = 0; i < o.length; i += 4) {
+        const bl = Math.max(40, bg[i] * 0.3 + bg[i + 1] * 0.59 + bg[i + 2] * 0.11);
+        if (mode === 'scan') {
+          let v = (o[i] * 0.3 + o[i + 1] * 0.59 + o[i + 2] * 0.11) / bl * 255;
+          v = v > 215 ? 255 : v < 70 ? 0 : (v - 70) * 255 / 145;
+          o[i] = o[i + 1] = o[i + 2] = v;
+        } else {
+          for (let c = 0; c < 3; c++) { let v = o[i + c] / Math.max(40, bg[i + c]) * 255; v = v > 235 ? 255 : v * 1.06; o[i + c] = v > 255 ? 255 : v; }
+        }
+      }
+    }
+    octx.putImageData(od, 0, 0);
+    return new Promise(r => out.toBlob(r, 'image/jpeg', mode === 'scan' ? 0.8 : 0.85));
+  }
+  function scanEditor(file) {
+    return new Promise(async (resolve) => {
+      let img; try { img = await loadImg(await compressImage(file, 2400, 0.92)); } catch (e) { toast('Photo illisible'); return resolve(null); }
+      let q = detectCorners(img); let mode = 'scan';
+      const m = document.createElement('div'); m.className = 'modal'; m.style.alignItems = 'stretch';
+      m.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" style="max-height:none;height:100%;border-radius:0;display:flex;flex-direction:column;padding-top:calc(12px + env(safe-area-inset-top))">' +
+        '<div class="rowx" style="margin-bottom:6px"><button class="back" id="sc-cancel">Annuler</button><b>Recadrer</b><button class="back" id="sc-reset">Auto</button></div>' +
+        '<p class="note" style="margin:0 4px 8px;font-size:13px">Place les 4 points sur les coins de la feuille.</p>' +
+        '<div id="sc-wrap" style="flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0;touch-action:none"><canvas id="sc-cv" style="max-width:100%;max-height:100%;border-radius:8px"></canvas><svg id="sc-svg" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none" aria-hidden="true"></svg></div>' +
+        '<div class="chips" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:10px 0">' + [['scan', 'Scan N&B'], ['couleur', 'Couleur'], ['original', 'Original']].map(([k, l]) => '<button class="chip' + (k === mode ? ' on' : '') + '" data-sm="' + k + '">' + l + '</button>').join('') + '</div>' +
+        '<button class="btn accent" id="sc-ok">Valider le scan</button></div>';
+      document.body.appendChild(m);
+      const cv = $('#sc-cv', m), svg = $('#sc-svg', m), wrap = $('#sc-wrap', m);
+      const dk = Math.min(1, 1100 / Math.max(img.naturalWidth, img.naturalHeight));
+      cv.width = Math.round(img.naturalWidth * dk); cv.height = Math.round(img.naturalHeight * dk); cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      const geo = () => { const r = cv.getBoundingClientRect(), wr = wrap.getBoundingClientRect(); return { ox: r.left - wr.left, oy: r.top - wr.top, s: r.width / img.naturalWidth }; };
+      const draw = () => {
+        const G = geo(); const pts = q.map(([x, y]) => [G.ox + x * G.s, G.oy + y * G.s]);
+        svg.innerHTML = '<polygon points="' + pts.map(p => p.join(',')).join(' ') + '" fill="rgba(44,106,154,.18)" stroke="#2C6A9A" stroke-width="2"/>' + pts.map(p => '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="13" fill="#fff" stroke="#2C6A9A" stroke-width="3"/>').join('');
+      };
+      requestAnimationFrame(draw); window.addEventListener('resize', draw);
+      let drag = -1;
+      const toImg = e => { const G = geo(), wr = wrap.getBoundingClientRect(); return [Math.min(img.naturalWidth, Math.max(0, (e.clientX - wr.left - G.ox) / G.s)), Math.min(img.naturalHeight, Math.max(0, (e.clientY - wr.top - G.oy) / G.s))]; };
+      wrap.addEventListener('pointerdown', e => { const p = toImg(e); const G = geo(); let bi = -1, bd = 48 / G.s; q.forEach((c, i) => { const dd = Math.hypot(c[0] - p[0], c[1] - p[1]); if (dd < bd) { bd = dd; bi = i; } }); drag = bi; if (bi >= 0) { wrap.setPointerCapture(e.pointerId); e.preventDefault(); } });
+      wrap.addEventListener('pointermove', e => { if (drag < 0) return; q[drag] = toImg(e); draw(); });
+      wrap.addEventListener('pointerup', () => { drag = -1; }); wrap.addEventListener('pointercancel', () => { drag = -1; });
+      $$('[data-sm]', m).forEach(b => b.onclick = () => { mode = b.dataset.sm; $$('[data-sm]', m).forEach(x => x.classList.toggle('on', x === b)); });
+      $('#sc-reset', m).onclick = () => { q = detectCorners(img); draw(); };
+      const end = v => { window.removeEventListener('resize', draw); m.remove(); resolve(v); };
+      $('#sc-cancel', m).onclick = () => end(null);
+      $('#sc-ok', m).onclick = async () => { const b = $('#sc-ok', m); b.disabled = true; b.textContent = 'Traitement…'; await new Promise(r => setTimeout(r, 30)); try { end(await renderScan(img, q, mode)); } catch (e) { console.warn(e); toast('Scan impossible, photo gardée telle quelle'); end(await compressImage(file, 2200, 0.85)); } };
+    });
+  }
+
+  // ---------- PDF d'une page à partir d'un JPEG ----------
+  async function jpegToPdf(blob) {
+    const img = await loadImg(blob); const iw = img.naturalWidth, ih = img.naturalHeight;
+    const jpg = new Uint8Array(await blob.arrayBuffer());
+    const PW = 595.28, PH = 841.89, mg = 18; const s = Math.min((PW - 2 * mg) / iw, (PH - 2 * mg) / ih);
+    const w = iw * s, h = ih * s, x = (PW - w) / 2, y = (PH - h) / 2;
+    const te = new TextEncoder(); const parts = []; const offs = []; let len = 0;
+    const add = p => { const u = typeof p === 'string' ? te.encode(p) : p; parts.push(u); len += u.length; };
+    const content = 'q ' + w.toFixed(2) + ' 0 0 ' + h.toFixed(2) + ' ' + x.toFixed(2) + ' ' + y.toFixed(2) + ' cm /Im0 Do Q';
+    add('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+    const obj = (n, body) => { offs[n] = len; add(n + ' 0 obj\n'); body(); add('\nendobj\n'); };
+    obj(1, () => add('<< /Type /Catalog /Pages 2 0 R >>'));
+    obj(2, () => add('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'));
+    obj(3, () => add('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + PW + ' ' + PH + '] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>'));
+    obj(4, () => { add('<< /Type /XObject /Subtype /Image /Width ' + iw + ' /Height ' + ih + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + jpg.length + ' >>\nstream\n'); add(jpg); add('\nendstream'); });
+    obj(5, () => add('<< /Length ' + content.length + ' >>\nstream\n' + content + '\nendstream'));
+    const xref = len; let xr = 'xref\n0 6\n0000000000 65535 f \n'; for (let i = 1; i <= 5; i++) xr += String(offs[i]).padStart(10, '0') + ' 00000 n \n';
+    add(xr + 'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF\n');
+    return new Blob(parts, { type: 'application/pdf' });
+  }
+
+  // ---------- Envoi de l'ordonnance à la titulaire ----------
+  function envoiInfo(c) {
+    if (!c) return { label: 'la titulaire', format: 'pdf' };
+    const e = c.envoi || {};
+    const label = e.type === 'groupe' ? (e.groupe ? 'Groupe « ' + e.groupe + ' »' : 'le groupe du cabinet') : (c.titulaire || 'la titulaire') + (c.tel ? ' (' + c.tel + ')' : '');
+    return { label, format: e.format || 'pdf', type: e.type || 'titulaire' };
+  }
+  async function sendOrdo(pid) {
+    const p = pat(pid); const o = p.ordo; const c = cab(p.cabinetId);
+    if (!o || !o.photoId) return toast('Pas de photo d’ordonnance');
+    const rec = await IDB.get(o.photoId); if (!rec) return toast('Photo introuvable');
+    const info = envoiInfo(c);
+    const texte = 'Ordonnance de ' + p.nom;
+    const base = ('Ordonnance ' + p.nom).replace(/[^\wÀ-ÿ -]/g, '').replace(/\s+/g, '_').slice(0, 50);
+    sheet('<h2>Envoyer l’ordonnance</h2><div class="card" style="padding:12px 14px"><div class="note" style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px">À envoyer à</div><b style="font-size:17px">' + esc(info.label) + '</b><div class="note" style="margin-top:4px">' + esc(c ? c.nom : '') + ' · en ' + (info.format === 'pdf' ? 'PDF' : 'photo') + '</div></div>' +
+      '<p class="note">Touche Partager, puis <b>WhatsApp</b>, puis cette conversation. Le texte « ' + esc(texte) + ' » est joint.</p>' +
+      '<button class="btn accent" id="so-go" style="margin-top:6px">Partager</button>' +
+      '<div class="btns"><button class="btn ghost" id="so-fmt">En ' + (info.format === 'pdf' ? 'photo' : 'PDF') + ' cette fois</button><button class="btn" data-close>Annuler</button></div>',
+      (m, close) => {
+        let fmt = info.format;
+        const go = async () => {
+          try {
+            const file = fmt === 'pdf' ? new File([await jpegToPdf(rec.blob)], base + '.pdf', { type: 'application/pdf' }) : new File([rec.blob], base + '.jpg', { type: 'image/jpeg' });
+            if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text: texte, title: texte }); close(); toast('Ordonnance partagée'); }
+            else if (info.type === 'titulaire' && c && c.tel) { window.open('https://wa.me/' + c.tel.replace(/\D/g, '').replace(/^0/, '33') + '?text=' + encodeURIComponent(texte), '_blank'); toast('Partage de fichier indisponible ici : joins la photo à la main'); }
+            else toast('Partage indisponible ici : ouvre l’appli depuis l’icône sur l’iPhone');
+          } catch (e) { if (e.name !== 'AbortError') toast('Envoi impossible : ' + e.message); }
+        };
+        $('#so-go', m).onclick = go;
+        $('#so-fmt', m).onclick = () => { fmt = fmt === 'pdf' ? 'photo' : 'pdf'; go(); };
+      });
+  }
+
   // ---------- Ordonnance : lecture locale, puis IA si besoin (avec accord) ----------
   let ocrWorker = null;
   function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('chargement impossible')); document.head.appendChild(s); }); }
@@ -1617,10 +1791,12 @@
     const expired = o.end && o.end < today();
     sheet('<h2>Ordonnance — ' + esc(p.nom) + '</h2>' + (o.photoId ? '<img data-pid="' + o.photoId + '" alt="Photo de l’ordonnance" style="width:100%;max-height:260px;object-fit:contain;border-radius:12px;background:#dde7ee;display:block;margin-bottom:10px">' : '') +
       '<div class="card" style="padding:12px 14px"><div class="note" style="font-size:12px">Enregistrée le ' + esc(dateCourt(o.date)) + (expired ? ' · <b style="color:var(--warn)">terminée</b>' : '') + '</div><div style="margin-top:4px;line-height:1.4">' + esc(ordoResume(o)) + '</div></div>' +
+      (o.photoId ? '<button class="btn accent" id="om-send" style="margin-top:12px">Envoyer à la titulaire</button>' : '') +
       '<div class="btns"><button class="btn ghost" id="om-edit">Corriger</button><button class="btn ghost" id="om-new">Nouvelle</button></div><div class="btns" style="margin-top:0"><button class="btn danger" id="om-del">Supprimer</button><button class="btn" data-close>Fermer</button></div>',
       (m, close) => {
         fillThumbs(m);
         const im = $('img[data-pid]', m); if (im) im.onclick = async () => viewPhoto(await photoUrl(o.photoId), 'Ordonnance');
+        const snd = $('#om-send', m); if (snd) snd.onclick = () => { close(); sendOrdo(pid); };
         $('#om-edit', m).onclick = () => { close(); ordoReview(pid, JSON.parse(JSON.stringify(o)), null, done); };
         $('#om-new', m).onclick = () => { close(); ordoScan(pid, done); };
         $('#om-del', m).onclick = () => confirmBox('Supprimer l’ordonnance de ' + p.nom + ' ?', 'Supprimer', async () => { await delPhotos([o.photoId]); delete p.ordo; save(); close(); done && done(); });
@@ -1628,10 +1804,12 @@
   }
   function ordoScan(pid, done) {
     pickImage(async file => {
+      UI.scanned = await scanEditor(file);
+      if (!UI.scanned) return;
       let closeWait = null;
       sheet('<h2>Lecture de l’ordonnance…</h2><p class="note" id="ocr-st">Préparation (la première fois, ça prend quelques secondes).</p><div style="height:8px;background:#dde7ee;border-radius:4px;overflow:hidden"><div id="ocr-bar" style="height:100%;width:5%;background:var(--accent);transition:width .2s"></div></div><p class="note" style="margin-top:12px">Tout se passe sur le téléphone, rien n’est envoyé.</p>', (m, close) => { closeWait = close; });
-      let blob;
-      try { blob = await compressImage(file, 2200, 0.85); } catch (e) { closeWait && closeWait(); return toast('Photo illisible'); }
+      let blob = UI.scanned; UI.scanned = null;
+      if (!blob) { closeWait && closeWait(); return; }
       let parsed = null, conf = 0;
       try {
         const r = await ocrImage(blob, msg => {
@@ -1691,7 +1869,7 @@
         let photoId = (p.ordo && p.ordo.photoId) || null;
         if (blob) { if (photoId) await delPhotos([photoId]); photoId = uid(); await IDB.put({ id: photoId, patientId: pid, date: today(), kind: 'ordo', blob }); }
         p.ordo = { date: today(), photoId, acts: o.acts, rec: o.rec, start: o.start, end: o.end, dimanche: o.dimanche, passages: o.passages, source: o.source };
-        save(); m.remove(); toast('Ordonnance enregistrée'); done && done();
+        save(); m.remove(); toast('Ordonnance enregistrée'); done && done(); if (blob) ordoMenu(pid, done);
       };
     };
     const m = document.createElement('div'); m.className = 'modal';
