@@ -32,12 +32,13 @@ Soeuringue est une appli web installable. Tu la mets en ligne une fois (gratuit)
 - **Transmissions** (semaine du mardi au lundi) : **📥 Reçues** le lundi de la collègue, **📤 À donner** à la fin de sa semaine. Choisis le cabinet, cherche le patient, puis **RAS ✅** ou **Info**. Les transmissions s'affichent ensuite en jaune (reçues) ou en vert (à donner) dans la tournée et sur la fiche patient.
 - **Ordonnance** (📄 sur la fiche patient ou l'écran du passage) : photo de l'ordonnance, lue **sur le téléphone** (rien n'est envoyé). Elle vérifie les soins, la fréquence et les dates, puis Enregistrer. Ensuite, sur l'écran du passage, **Appliquer** remplit les actes en une touche. Si l'ordonnance n'est pas lue (souvent manuscrite) et qu'une clé API est enregistrée, l'appli propose de l'envoyer à l'IA, **seulement après confirmation** (la photo part alors chez Anthropic avec les infos du patient). La toute première lecture a besoin du réseau pour charger le lecteur, ensuite ça marche hors ligne.
 - **Photos du soin** (📷 sur l'écran du passage) : rattachées au passage. Sur la fiche patient, 📷 montre toutes les photos avec J1, J7… pour suivre la plaie. Elles restent sur le téléphone.
+- **Planning** : le mois en grille. **+ Jours de travail** : choisis le cabinet, puis touche les jours (ou « Une période » : premier jour, puis dernier). **+ Événement** pour le perso, avec rappel la veille au soir par défaut. **Enregistrer et ajouter au calendrier iPhone** ouvre l'ajout dans Calendrier : touche « Ajouter » pour avoir la notification. Touche un jour pour voir son détail. Le cabinet du jour est proposé automatiquement dans la tournée et l'ajout de passage, et apparaît sur l'accueil.
 - **Réglages** : la roue ⚙︎ en haut de l'accueil.
 - **Refaire** : sur la fiche d'un patient, ce bouton recopie un passage au jour choisi (hier, aujourd'hui, demain ou autre date).
 - **Nom dans la note** : dans la fiche patient, à remplir seulement si le nom de famille déduit automatiquement ne convient pas.
 - **Répéter** (facultatif) : pour un remplacement long, un soin peut être répété tous les jours, tous les 2 jours ou certains jours.
 - **Patients** : choisis un cabinet pour voir ses patients, avec **+ Nouveau patient** en haut. La recherche de la première page cherche dans tous les cabinets.
-- **Cabinets** : nom et téléphone de la titulaire (bouton Appeler), montants du mois et virements.
+- **Cabinets** : sur l'accueil, touche la carte d'un cabinet (titulaire, bouton Appeler, montants, virements). **+ Nouveau cabinet** juste en dessous. Nom court et couleur pour le planning.
 - **Noter un virement reçu** dans chaque cabinet. L'accueil affiche alors ce qui manque.
 - **Détail du mois (PDF)** : bouton **Exporter en PDF**, puis dans la fenêtre d'impression, **Partager** pour l'enregistrer en PDF.
 
@@ -51,7 +52,7 @@ Dans **Réglages**, puis **Sauvegarder** : ça crée un fichier chiffré par un 
 
 ## 7. Mise à jour de l'appli
 
-Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.7.0` devient `v1.7.1`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
+Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.8.0` devient `v1.8.1`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
 
 ---
 Les montants sont des **estimations** calculées selon la NGAP (avenant 11), la brochure Idelstory et le guide CBA. Les tarifs et les règles sont modifiables dans Réglages. Pour un cas particulier, il y a **Ajouter un acte à la main**, puis **Acte manuel**.

@@ -17,7 +17,7 @@
   function blank() {
     return { v: 1, cabinets: [], patients: [], soins: [], virements: [],
       tarifs: JSON.parse(JSON.stringify(E.DEFAULT_TARIFS)), regles: Object.assign({}, E.DEFAULT_REGLES),
-      apiKey: '', aiModel: 'claude-haiku-5-5', tournees: {}, absences: [], faits: [], transmissions: {} };
+      apiKey: '', aiModel: 'claude-haiku-5-5', tournees: {}, absences: [], faits: [], transmissions: {}, planning: {}, events: [] };
   }
   function load() {
     try {
@@ -205,8 +205,9 @@
     const q = Object.fromEntries(new URLSearchParams(query || ''));
     window.scrollTo(0, 0); document.body.classList.remove('noTabs');
     switch (parts[0]) {
-      case 'cabinets': setTab('cabinets'); return viewCabinets();
-      case 'cabinet': setTab('cabinets'); return viewCabinet(parts[1]);
+      case 'cabinets': setTab('mois'); return viewCabinets();
+      case 'cabinet': setTab('mois'); return viewCabinet(parts[1]);
+      case 'planning': setTab('planning'); return viewPlanning();
       case 'patients': setTab('patients'); return viewPatients(parts[1]);
       case 'patient': setTab('patients'); return viewPatient(parts[1]);
       case 'ajout': setTab(''); document.body.classList.add('noTabs'); return viewAjout(q);
@@ -241,21 +242,29 @@
     const d = monthData(UI.month);
     const ecart = d.tot.recu - d.tot.part;
     let h = installBanner() + brandTop('Soeuringue', '<a class="icon-btn" href="#reglages" aria-label="Réglages" style="display:flex;align-items:center;justify-content:center;background:#fff;text-decoration:none;color:var(--ink)"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>') + monthNav();
-    h += '<div class="hero"><div class="lbl">Ce que tu devrais toucher</div><div class="big">' + eur0(d.tot.part) + '</div>' +
+    {
+      const t = today(); const wc = workCab(t); const evs = dayEvents(t);
+      const nT = ((S.tournees || {})[t] || []).length;
+      let next = null; if (!wc) { next = (S.events || []).filter(e => e.date >= t).sort((a, b) => (a.date + (a.heure || '')).localeCompare(b.date + (b.heure || '')))[0]; }
+      h += '<a class="card rowx" href="' + (wc ? '#soins' : '#planning') + '" id="h-today" style="padding:9px 14px;margin-bottom:10px;text-decoration:none;color:inherit;gap:12px"><span style="width:6px;align-self:stretch;border-radius:3px;background:' + (wc ? cabColor(wc) : '#C9D4DD') + '"></span><span style="flex:1;min-width:0"><span class="note" style="display:block;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px">Aujourd’hui · ' + esc(dateFr(t)) + '</span><b style="display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+        (wc ? esc(wc.nom) + (nT ? ' · ' + nT + ' patient' + (nT > 1 ? 's' : '') : '') : evs.length ? esc(evs.map(e => (e.heure ? e.heure + ' ' : '') + e.titre).join(' · ')) : 'Repos' + (next ? ' · prochain : ' + esc(next.titre) + ' le ' + esc(dateCourt(next.date).slice(0, 5)) : '')) + '</b></span><b style="color:var(--accent);font-size:14px;white-space:nowrap">' + (wc ? 'Tournée ›' : 'Planning ›') + '</b></a>';
+    }
+    h += '<div class="hero" style="padding:14px 18px;margin-bottom:10px"><div class="lbl">Ce que tu devrais toucher</div><div class="big" style="font-size:34px;margin:0">' + eur0(d.tot.part) + '</div>' +
       '<div class="sub">' + eur(d.tot.facture) + ' facturés par les titulaires · rétrocession déduite</div>' +
       '<div class="row soft"><span>Reçu des titulaires</span><span>' + eur(d.tot.recu) + '</span></div>' +
       (d.tot.recu > 0 || d.tot.part > 0 ? '<div class="row white ' + (ecart >= -0.5 ? 'ok' : '') + '"><span>' + (ecart >= -0.5 ? 'Tout est reçu' : 'Il manque') + '</span><span>' + (ecart >= -0.5 ? '✓' : eur(-ecart)) + '</span></div>' : '') +
       '</div>';
-    h += '<div class="section">Par cabinet</div>';
+    h += '<div class="section" style="margin:12px 4px 6px">Par cabinet</div>';
     S.cabinets.forEach(c => {
       const b = d.byCab[c.id]; const e = b.recu - b.part;
       const pill = b.part === 0 && b.recu === 0 ? '' : e >= -0.5 ? '<span class="pill ok">OK</span>' : '<span class="pill warn">− ' + eur0(-e) + '</span>';
-      h += '<a class="card" href="#cabinet/' + c.id + '" style="display:block;text-decoration:none;color:inherit"><div class="rowx" style="margin-bottom:10px"><b style="font-size:16px">' + esc(c.nom) + '</b>' + pill + '</div>' +
+      h += '<a class="card" href="#cabinet/' + c.id + '" style="display:block;text-decoration:none;color:inherit;padding:11px 14px;margin-bottom:8px"><div class="rowx" style="margin-bottom:6px"><b style="font-size:16px;display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:5px;background:' + cabColor(c) + ';flex:none"></span>' + esc(c.nom) + '</b>' + pill + '</div>' +
         '<div class="grid3"><div>Facturé<b>' + eur0(b.facture) + '</b></div><div>Ta part<b>' + eur0(b.part) + '</b></div><div>Reçu<b>' + eur0(b.recu) + '</b></div></div></a>';
     });
-    h += '<div class="btns"><a class="btn" href="#ajout">+ Noter un passage</a></div>';
-    h += '<a class="btn ghost" href="#detail">Détail du mois (PDF)</a>';
+    h += '<div class="g2" style="grid-template-columns:1fr 1fr"><button class="btn ghost small" id="h-newcab" style="min-height:46px">+ Nouveau cabinet</button><a class="btn ghost small" href="#detail" style="min-height:46px">Détail du mois</a></div>';
     app.innerHTML = h; bindMonthNav(); bindBanner();
+    $('#h-newcab').onclick = () => editCabinet(null);
+    const ht = $('#h-today'); if (ht) ht.addEventListener('click', () => { UI.soinsVue = 'jour'; UI.soinsDate = today(); });
   }
   function bindBanner() { const b = $('#bn-off'); if (b) b.onclick = () => { localStorage.setItem('soeur_banner_off', '1'); route(); }; }
 
@@ -275,28 +284,35 @@
     h += '<button class="btn accent" id="new-cab">+ Nouveau cabinet</button>';
     app.innerHTML = h; $('#new-cab').onclick = () => editCabinet(null);
   }
-  function editCabinet(id) {
+  function editCabinet(id, onCreated) {
     const c = id ? cab(id) : { nom: '', retro: 10 };
+    let col = id ? cabColor(c) : CAB_COLORS[S.cabinets.length % CAB_COLORS.length];
     sheet('<h2>' + (id ? 'Modifier le cabinet' : 'Nouveau cabinet') + '</h2>' +
       '<label class="f" for="c-nom">Nom du cabinet</label><input class="in" id="c-nom" value="' + esc(c.nom) + '" autocomplete="off" placeholder="ex : Cabinet Rosa Parks">' +
       '<label class="f" for="c-tit">Nom de la titulaire</label><input class="in" id="c-tit" value="' + esc(c.titulaire || '') + '" autocomplete="off" autocapitalize="words">' +
       '<label class="f" for="c-tel">Téléphone de la titulaire</label><input class="in" id="c-tel" type="tel" value="' + esc(c.tel || '') + '" autocomplete="off">' +
       '<label class="f" for="c-retro">Rétrocession au titulaire (%)</label><input class="in" id="c-retro" type="number" inputmode="decimal" min="0" max="100" step="0.5" value="' + esc(c.retro) + '">' +
+      '<label class="f" for="c-court">Nom court dans le planning</label><input class="in" id="c-court" value="' + esc(c.court || '') + '" placeholder="ex : 93, Rosa…" autocomplete="off" maxlength="12">' +
+      '<label class="f">Couleur</label><div style="display:flex;flex-wrap:wrap;gap:8px" id="c-cols">' + CAB_COLORS.map(x => '<button class="colsw" data-col="' + x + '" aria-label="Couleur ' + x + '" style="background:' + x + '"></button>').join('') + '</div>' +
       '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="c-ok">Enregistrer</button></div>' +
       (id ? '<button class="btn danger" id="c-del">Supprimer ce cabinet</button>' : ''),
       (m, close) => {
+        const paint = () => $$('[data-col]', m).forEach(b => b.classList.toggle('on', b.dataset.col === col));
+        $$('[data-col]', m).forEach(b => b.onclick = () => { col = b.dataset.col; paint(); }); paint();
         $('#c-ok', m).onclick = () => {
           const nom = $('#c-nom', m).value.trim(); if (!nom) return toast('Donne un nom au cabinet');
           const retro = parseFloat(String($('#c-retro', m).value).replace(',', '.')) || 0;
-          const extra = { titulaire: $('#c-tit', m).value.trim(), tel: $('#c-tel', m).value.trim() };
-          if (id) Object.assign(c, { nom, retro }, extra); else S.cabinets.push(Object.assign({ id: uid(), nom, retro }, extra));
+          const extra = { titulaire: $('#c-tit', m).value.trim(), tel: $('#c-tel', m).value.trim(), court: $('#c-court', m).value.trim(), color: col };
+          let created = null;
+          if (id) Object.assign(c, { nom, retro }, extra); else { created = Object.assign({ id: uid(), nom, retro }, extra); S.cabinets.push(created); }
           save(); close(); route();
+          if (created && onCreated) onCreated(created);
         };
         const del = $('#c-del', m);
         if (del) del.onclick = () => {
           const n = S.patients.filter(p => p.cabinetId === id).length;
           if (n) return toast('Déplace ou supprime d’abord ses ' + n + ' patient(s)');
-          confirmBox('Supprimer « ' + c.nom + ' » ?', 'Supprimer', () => { S.cabinets = S.cabinets.filter(x => x.id !== id); S.virements = S.virements.filter(v => v.cabinetId !== id); save(); close(); location.hash = '#cabinets'; });
+          confirmBox('Supprimer « ' + c.nom + ' » ?', 'Supprimer', () => { S.cabinets = S.cabinets.filter(x => x.id !== id); S.virements = S.virements.filter(v => v.cabinetId !== id); Object.keys(S.planning || {}).forEach(d => { if (S.planning[d] === id) delete S.planning[d]; }); save(); close(); location.hash = '#cabinets'; });
         };
       });
   }
@@ -579,7 +595,7 @@
     const start = existing ? existing.start : (q.date || today());
     UI.draft = {
       id: existing ? existing.id : null,
-      cabinetId: p0 ? p0.cabinetId : (q.cabinet || (S.cabinets.length === 1 ? S.cabinets[0].id : (UI.lastCab && cab(UI.lastCab) ? UI.lastCab : S.cabinets[0].id))),
+      cabinetId: p0 ? p0.cabinetId : (q.cabinet || (workCab(start) ? workCab(start).id : null) || (S.cabinets.length === 1 ? S.cabinets[0].id : (UI.lastCab && cab(UI.lastCab) ? UI.lastCab : S.cabinets[0].id))),
       patientId: p0 ? p0.id : null, patientName: p0 ? p0.nom : '',
       newP: { bsi: '', diab: false, cancer: false, palliatif: false, enfant7: false, km: 0, adresse: '', code: '', etage: '', porte: '', tel: '', noteSoin: '' },
       texte: (q.note && p0 && p0.noteSoin) ? p0.noteSoin : '', acts: base ? JSON.parse(JSON.stringify(base.acts)) : [], unknown: [],
@@ -985,7 +1001,7 @@
   function editTournee(date) {
     let ordre = ((S.tournees || {})[date] || []).filter(id => pat(id));
     let q = '';
-    let selCab = S.cabinets.length === 1 ? S.cabinets[0].id : null;
+    let selCab = S.cabinets.length === 1 ? S.cabinets[0].id : (workCab(date) ? workCab(date).id : null);
     const m = document.createElement('div'); m.className = 'modal';
     m.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" style="max-height:92vh"></div>';
     document.body.appendChild(m);
@@ -1046,6 +1062,177 @@
           catch (e) { const t = $('#bl-txt', m); t.removeAttribute('readonly'); t.select(); document.execCommand('copy'); toast('Copié'); }
         };
         $('#bl-share', m).onclick = async () => { if (navigator.share) { try { await navigator.share({ text: txt }); } catch (e) {} } else toast('Partage indisponible ici, utilise Copier'); };
+      });
+  }
+
+  // ----- Planning : jours de travail + événements perso -----
+  const CAB_COLORS = ['#E0489A', '#3B6FE0', '#2F8A5B', '#E07A1F', '#7A4FD0', '#0E8C9A', '#C0392B', '#5D6D7E'];
+  function cabColor(c) { if (!c) return '#8896A5'; return c.color || CAB_COLORS[Math.max(0, S.cabinets.indexOf(c)) % CAB_COLORS.length]; }
+  function cabCourt(c) { return c ? (c.court || c.nom.replace(/^cabinet\s+(de\s+|du\s+|des\s+)?/i, '')) : ''; }
+  function workCab(date) { const id = (S.planning || {})[date]; return id && cab(id) ? cab(id) : null; }
+  function dayEvents(date) { return (S.events || []).filter(e => e.date === date).sort((a, b) => (a.heure || '').localeCompare(b.heure || '')); }
+  function viewPlanning() {
+    const ym = UI.planMonth || (UI.planMonth = today().slice(0, 7));
+    const [y, mo] = ym.split('-').map(Number);
+    const first = new Date(y, mo - 1, 1, 12); const off = (first.getDay() + 6) % 7;
+    const start = E.addDays(E.iso(first), -off);
+    const nDays = new Date(y, mo, 0).getDate();
+    const weeks = Math.ceil((off + nDays) / 7);
+    const t = today();
+    let h = '<div class="top" style="margin-bottom:6px"><h1 style="font-size:28px;margin:0;font-weight:800;letter-spacing:-.5px;text-transform:capitalize">' + esc(MOIS[mo - 1]) + ' <span style="color:var(--muted);font-weight:700;font-size:20px">' + y + '</span></h1>' +
+      '<div style="display:flex;gap:6px"><button class="icon-btn" id="pl-prev" aria-label="Mois précédent" style="background:#fff">‹</button><button class="icon-btn" id="pl-today" aria-label="Aujourd’hui" style="background:#fff;font-size:13px;width:auto;padding:0 10px">Auj.</button><button class="icon-btn" id="pl-next" aria-label="Mois suivant" style="background:#fff">›</button></div></div>';
+    h += '<div class="plan"><div class="plan-head">' + ['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((d, i) => '<span' + (i > 4 ? ' class="we"' : '') + '>' + d + '</span>').join('') + '</div>';
+    h += '<div class="plan-grid" style="grid-template-rows:repeat(' + weeks + ',minmax(0,1fr))">';
+    for (let i = 0; i < weeks * 7; i++) {
+      const d = E.addDays(start, i); const inM = d.slice(0, 7) === ym; const c = workCab(d); const evs = dayEvents(d);
+      const dd = +d.slice(8, 10);
+      h += '<button class="plan-day' + (inM ? '' : ' out') + (i % 7 > 4 ? ' we' : '') + (d === t ? ' today' : '') + '" data-day="' + d + '" aria-label="' + esc(dateFr(d)) + (c ? ', ' + esc(c.nom) : '') + (evs.length ? ', ' + evs.length + ' événement(s)' : '') + '">' +
+        '<span class="num">' + dd + '</span>' +
+        (c ? '<span class="bar" style="background:' + cabColor(c) + '">' + esc(cabCourt(c)) + '</span>' : '') +
+        evs.slice(0, 2).map(e => '<span class="ev"><i></i>' + esc(e.titre) + '</span>').join('') +
+        (evs.length > 2 ? '<span class="ev more">+' + (evs.length - 2) + '</span>' : '') + '</button>';
+    }
+    h += '</div></div>';
+    h += '<div class="g2" style="grid-template-columns:1fr 1fr;margin-top:10px"><button class="btn small" id="pl-work" style="min-height:46px">+ Jours de travail</button><button class="btn ghost small" id="pl-ev" style="min-height:46px">+ Événement</button></div>';
+    app.innerHTML = h;
+    $('#pl-prev').onclick = () => { UI.planMonth = shiftMonth(ym, -1); route(); };
+    $('#pl-next').onclick = () => { UI.planMonth = shiftMonth(ym, 1); route(); };
+    $('#pl-today').onclick = () => { UI.planMonth = t.slice(0, 7); route(); };
+    $$('[data-day]').forEach(b => b.onclick = () => daySheet(b.dataset.day));
+    $('#pl-work').onclick = () => workDaysFlow();
+    $('#pl-ev').onclick = () => editEvent(null, ym === t.slice(0, 7) ? t : ym + '-01');
+  }
+  function daySheet(date) {
+    const c = workCab(date); const evs = dayEvents(date);
+    let h = '<h2 style="text-transform:capitalize">' + esc(dateFr(date)) + '</h2>';
+    h += c ? '<div class="card rowx" style="padding:10px 14px;border-left:6px solid ' + cabColor(c) + '"><div><div class="note" style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px">Travail</div><b>' + esc(c.nom) + '</b></div><a class="chip" href="#soins" id="ds-tour" style="display:inline-flex;align-items:center;text-decoration:none;min-height:40px;font-size:14px">Tournée ›</a></div>'
+      : '<div class="card note" style="padding:10px 14px">Pas de travail prévu ce jour-là.</div>';
+    h += '<div class="g2" style="grid-template-columns:1fr 1fr;margin-bottom:6px"><button class="btn ghost small" id="ds-cab" style="min-height:42px">' + (c ? 'Changer le cabinet' : '+ Je travaille') + '</button>' + (c ? '<button class="btn ghost small" id="ds-off" style="min-height:42px">Retirer le travail</button>' : '<span></span>') + '</div>';
+    h += '<div class="section">Événements perso</div>';
+    h += evs.length ? '<div class="list">' + evs.map(e => '<button class="item" data-ev="' + e.id + '" style="padding:10px 14px"><div><div class="t">' + esc(e.titre) + '</div><div class="s">' + (e.heure ? esc(e.heure.replace(':', ' h ')) : 'Toute la journée') + (e.rappel && e.rappel !== 'aucun' ? ' · rappel ' + (e.rappel === 'veille' ? 'la veille' : '1 h avant') : '') + (e.note ? ' · ' + esc(e.note) : '') + '</div></div><span class="s">›</span></button>').join('') + '</div>' : '<p class="note">Aucun événement.</p>';
+    h += '<div class="btns"><button class="btn ghost" data-close>Fermer</button><button class="btn accent" id="ds-add">+ Événement</button></div>';
+    sheet(h, (m, close) => {
+      const tr = $('#ds-tour', m); if (tr) tr.onclick = () => { UI.soinsVue = 'jour'; UI.soinsDate = date; close(); };
+      $('#ds-cab', m).onclick = () => { close(); pickCabinet(c ? c.id : null, id => { S.planning = S.planning || {}; S.planning[date] = id; save(); route(); daySheet(date); }); };
+      const off = $('#ds-off', m); if (off) off.onclick = () => { delete S.planning[date]; save(); close(); route(); };
+      $$('[data-ev]', m).forEach(b => b.onclick = () => { close(); editEvent(b.dataset.ev); });
+      $('#ds-add', m).onclick = () => { close(); editEvent(null, date); };
+    });
+  }
+  function pickCabinet(cur, cb) {
+    sheet('<h2>Quel cabinet ?</h2><div class="list">' + S.cabinets.map(c => '<button class="item" data-pc="' + c.id + '" style="min-height:52px"><span style="display:flex;align-items:center;gap:10px"><span style="width:14px;height:14px;border-radius:7px;background:' + cabColor(c) + '"></span><b>' + esc(c.nom) + '</b></span>' + (c.id === cur ? '<span class="pill info">actuel</span>' : '') + '</button>').join('') + '</div>' +
+      '<button class="btn ghost" id="pc-new" style="margin-top:4px">+ Nouveau cabinet</button><button class="btn" data-close style="margin-top:10px">Annuler</button>',
+      (m, close) => {
+        $$('[data-pc]', m).forEach(b => b.onclick = () => { close(); cb(b.dataset.pc); });
+        $('#pc-new', m).onclick = () => { close(); editCabinet(null, nc => cb(nc.id)); };
+      });
+  }
+  function workDaysFlow() {
+    if (!S.cabinets.length) return editCabinet(null, nc => workDaysFlow());
+    pickCabinet(null, cabId => workDaysSheet(cabId));
+  }
+  function workDaysSheet(cabId) {
+    const c = cab(cabId);
+    let ym = UI.planMonth || today().slice(0, 7);
+    const sel = new Set(Object.keys(S.planning || {}).filter(d => S.planning[d] === cabId));
+    const before = new Set(sel);
+    let rangeStart = null, mode = 'jours';
+    const m = document.createElement('div'); m.className = 'modal';
+    m.innerHTML = '<div class="sheet" role="dialog" aria-modal="true"></div>'; document.body.appendChild(m);
+    const sh = $('.sheet', m);
+    const draw = () => {
+      const [y, mo] = ym.split('-').map(Number);
+      const first = new Date(y, mo - 1, 1, 12); const off = (first.getDay() + 6) % 7; const start = E.addDays(E.iso(first), -off);
+      const weeks = Math.ceil((off + new Date(y, mo, 0).getDate()) / 7);
+      let h = '<h2 style="display:flex;align-items:center;gap:10px"><span style="width:16px;height:16px;border-radius:8px;background:' + cabColor(c) + '"></span>' + esc(c.nom) + '</h2>';
+      h += '<div class="chips" style="display:grid;grid-template-columns:1fr 1fr;margin:8px 0"><button class="chip' + (mode === 'jours' ? ' on' : '') + '" data-mode="jours">Jour par jour</button><button class="chip' + (mode === 'periode' ? ' on' : '') + '" data-mode="periode">Une période</button></div>';
+      h += '<p class="note" style="margin:0 4px 8px">' + (mode === 'jours' ? 'Touche les jours où tu travailles (re-touche pour retirer).' : (rangeStart ? 'Touche maintenant le dernier jour.' : 'Touche le premier jour, puis le dernier.')) + '</p>';
+      h += '<div class="rowx" style="margin-bottom:6px"><button class="icon-btn" id="wd-prev" aria-label="Mois précédent">‹</button><b style="text-transform:capitalize">' + esc(MOIS[mo - 1]) + ' ' + y + '</b><button class="icon-btn" id="wd-next" aria-label="Mois suivant">›</button></div>';
+      h += '<div class="plan-head" style="margin-bottom:4px">' + ['L', 'M', 'M', 'J', 'V', 'S', 'D'].map(d => '<span>' + d + '</span>').join('') + '</div><div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px">';
+      for (let i = 0; i < weeks * 7; i++) {
+        const d = E.addDays(start, i); const inM = d.slice(0, 7) === ym; const on = sel.has(d); const other = !on && workCab(d) && (S.planning[d] !== cabId);
+        h += '<button class="wd' + (on ? ' on' : '') + (inM ? '' : ' out') + (d === rangeStart ? ' rs' : '') + '" data-wd="' + d + '" style="' + (on ? 'background:' + cabColor(c) + ';border-color:' + cabColor(c) + ';' : '') + (other ? 'box-shadow:inset 0 -4px 0 ' + cabColor(workCab(d)) + ';' : '') + '" aria-pressed="' + on + '">' + (+d.slice(8, 10)) + '</button>';
+      }
+      h += '</div><p class="note" style="margin:8px 4px 0">' + sel.size + ' jour(s) sélectionné(s) pour ce cabinet.</p>';
+      h += '<div class="btns"><button class="btn ghost" id="wd-cancel">Annuler</button><button class="btn accent" id="wd-ok">Valider</button></div>';
+      sh.innerHTML = h;
+      $$('[data-mode]', sh).forEach(b => b.onclick = () => { mode = b.dataset.mode; rangeStart = null; draw(); });
+      $('#wd-prev', sh).onclick = () => { ym = shiftMonth(ym, -1); draw(); };
+      $('#wd-next', sh).onclick = () => { ym = shiftMonth(ym, 1); draw(); };
+      $$('[data-wd]', sh).forEach(b => b.onclick = () => {
+        const d = b.dataset.wd;
+        if (mode === 'jours') { sel.has(d) ? sel.delete(d) : sel.add(d); }
+        else if (!rangeStart) rangeStart = d;
+        else { let a = rangeStart, z = d; if (z < a) [a, z] = [z, a]; for (let x = a; x <= z; x = E.addDays(x, 1)) sel.add(x); rangeStart = null; }
+        draw();
+      });
+      $('#wd-cancel', sh).onclick = () => m.remove();
+      $('#wd-ok', sh).onclick = () => {
+        S.planning = S.planning || {};
+        before.forEach(d => { if (!sel.has(d) && S.planning[d] === cabId) delete S.planning[d]; });
+        sel.forEach(d => { S.planning[d] = cabId; });
+        save(); m.remove(); toast('Planning enregistré'); route();
+      };
+    };
+    draw();
+  }
+  function editEvent(id, date) {
+    const e = id ? S.events.find(x => x.id === id) : { titre: '', date: date || today(), heure: '', rappel: 'veille', note: '' };
+    sheet('<h2>' + (id ? 'Événement' : 'Nouvel événement') + '</h2>' +
+      '<label class="f" for="ev-t">Titre</label><input class="in" id="ev-t" value="' + esc(e.titre) + '" placeholder="ex : Rdv dentiste" autocomplete="off">' +
+      '<div class="g2" style="grid-template-columns:1fr 1fr"><div><label class="f" for="ev-d">Date</label><input class="in" type="date" id="ev-d" value="' + esc(e.date) + '"></div><div><label class="f" for="ev-h">Heure (facultatif)</label><input class="in" type="time" id="ev-h" value="' + esc(e.heure || '') + '"></div></div>' +
+      '<label class="f" for="ev-r">Rappel sur l’iPhone</label><select class="in" id="ev-r">' + [['veille', 'La veille au soir (20 h)'], ['1h', '1 h avant'], ['aucun', 'Aucun']].map(([k, l]) => '<option value="' + k + '"' + (e.rappel === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>' +
+      '<label class="f" for="ev-n">Note (facultatif)</label><input class="in" id="ev-n" value="' + esc(e.note || '') + '" autocomplete="off">' +
+      '<button class="btn accent" id="ev-ok" style="margin-top:14px">Enregistrer et ajouter au calendrier iPhone</button>' +
+      '<div class="btns"><button class="btn ghost" id="ev-only">Enregistrer seulement</button>' + (id ? '<button class="btn danger" id="ev-del">Supprimer</button>' : '<button class="btn ghost" data-close>Annuler</button>') + '</div>',
+      (m, close) => {
+        const read = () => {
+          const titre = $('#ev-t', m).value.trim(); if (!titre) { toast('Donne un titre'); return null; }
+          const data = { titre, date: $('#ev-d', m).value || today(), heure: $('#ev-h', m).value, rappel: $('#ev-r', m).value, note: $('#ev-n', m).value.trim() };
+          if (data.rappel === '1h' && !data.heure) data.rappel = 'veille';
+          return data;
+        };
+        const store = data => { S.events = S.events || []; if (id) Object.assign(e, data); else { e.id = uid(); Object.assign(e, data); S.events.push(e); } save(); };
+        $('#ev-ok', m).onclick = () => { const d = read(); if (!d) return; store(d); close(); exportIcs(e); route(); };
+        $('#ev-only', m).onclick = () => { const d = read(); if (!d) return; store(d); close(); toast('Événement enregistré'); route(); };
+        const del = $('#ev-del', m); if (del) del.onclick = () => confirmBox('Supprimer « ' + e.titre + ' » ? (Pense à le retirer aussi du calendrier iPhone.)', 'Supprimer', () => { S.events = S.events.filter(x => x.id !== id); save(); close(); route(); });
+      });
+  }
+  function icsEsc(s) { return String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/([,;])/g, '\\$1'); }
+  function icsUtc(d) { return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); }
+  function buildIcs(e) {
+    const ds = e.date.replace(/-/g, '');
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Soeuringue//FR', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT',
+      'UID:' + e.id + '@soeuringue', 'DTSTAMP:' + icsUtc(new Date()), 'SUMMARY:' + icsEsc(e.titre)];
+    if (e.heure) {
+      const [hh, mm] = e.heure.split(':').map(Number);
+      const st = new Date(+e.date.slice(0, 4), +e.date.slice(5, 7) - 1, +e.date.slice(8, 10), hh, mm);
+      lines.push('DTSTART:' + icsUtc(st), 'DTEND:' + icsUtc(new Date(st.getTime() + 3600000)));
+    } else {
+      lines.push('DTSTART;VALUE=DATE:' + ds, 'DTEND;VALUE=DATE:' + E.addDays(e.date, 1).replace(/-/g, ''));
+    }
+    if (e.note) lines.push('DESCRIPTION:' + icsEsc(e.note));
+    if (e.rappel && e.rappel !== 'aucun') {
+      let trig;
+      if (e.rappel === '1h') trig = 'TRIGGER:-PT1H';
+      else { const v = new Date(+e.date.slice(0, 4), +e.date.slice(5, 7) - 1, +e.date.slice(8, 10) - 1, 20, 0); trig = 'TRIGGER;VALUE=DATE-TIME:' + icsUtc(v); }
+      lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + icsEsc(e.titre), trig, 'END:VALARM');
+    }
+    lines.push('END:VEVENT', 'END:VCALENDAR');
+    return lines.join('\r\n') + '\r\n';
+  }
+  function exportIcs(e) {
+    const ics = buildIcs(e);
+    const url = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(ics);
+    sheet('<h2>Ajouter au calendrier iPhone</h2><p class="note">Touche le bouton : l’iPhone affiche l’événement, puis touche <b>Ajouter au calendrier</b>. Le rappel est déjà réglé.</p>' +
+      '<a class="btn accent" id="ics-go" href="' + url + '" download="' + esc(e.titre.replace(/[^\wÀ-ÿ -]/g, '').slice(0, 40) || 'evenement') + '.ics" style="margin-top:12px">Ouvrir dans Calendrier</a>' +
+      '<div class="btns"><button class="btn ghost" id="ics-share">Partager</button><button class="btn" data-close>Fermer</button></div>',
+      (m, close) => {
+        $('#ics-go', m).addEventListener('click', () => setTimeout(close, 400));
+        $('#ics-share', m).onclick = async () => {
+          const f = new File([ics], 'evenement.ics', { type: 'text/calendar' });
+          if (navigator.canShare && navigator.canShare({ files: [f] })) { try { await navigator.share({ files: [f] }); close(); } catch (err) {} } else toast('Partage indisponible ici');
+        };
       });
   }
 
