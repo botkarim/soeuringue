@@ -624,6 +624,7 @@
       photoIds: existing ? (existing.photos || []).slice() : [], newPhotos: []
     };
     if (UI.draft.texte) { const r = parseLocal(UI.draft.texte); mergeActs(r.acts); UI.draft.unknown = r.unknown; }
+    if (q.redo && UI.draft.patientId) { const lp = prevPassage(UI.draft.patientId); if (lp) { UI.draft.acts = JSON.parse(JSON.stringify(lp.acts)); setTimeout(() => toast('Soins du ' + dateFr(lp.start) + ' repris : ajoute ce qu’il faut'), 50); } }
     drawAjout();
   }
   function drawAjout() {
@@ -670,10 +671,15 @@
     const p = D.patientId && pat(D.patientId);
     const o = p && p.ordo;
     const nPh = D.photoIds.length + D.newPhotos.length;
-    box.innerHTML = '<div class="g2" style="grid-template-columns:repeat(' + (o ? 3 : 2) + ',minmax(0,1fr));margin-top:6px">' +
-      '<button class="chip" id="a-ordo" style="min-height:40px;font-size:14px;padding:0 6px;white-space:nowrap">📄 ' + (o ? 'Ordo ✓' : 'Ordonnance') + '</button>' +
-      (o ? '<button class="chip on" id="a-apply" style="min-height:42px;font-size:14px;padding:0 6px">Appliquer</button>' : '') +
-      '<button class="chip' + (nPh ? ' on' : '') + '" id="a-photo" style="min-height:40px;font-size:14px;padding:0 6px;white-space:nowrap">📷 Photo' + (nPh ? ' (' + nPh + ')' : '') + '</button></div>';
+    const lp = p && prevPassage(p.id);
+    const nb = 2 + (o ? 1 : 0) + (lp ? 1 : 0); const compact = nb >= 4;
+    const st = 'min-height:40px;font-size:' + (compact ? 13 : 14) + 'px;padding:0 4px;white-space:nowrap';
+    box.innerHTML = '<div class="g2" style="grid-template-columns:repeat(' + nb + ',minmax(0,1fr));margin-top:6px">' +
+      '<button class="chip" id="a-ordo" style="' + st + '">📄 ' + (o ? 'Ordo ✓' : compact ? 'Ordo' : 'Ordonnance') + '</button>' +
+      (lp ? '<button class="chip" id="a-redo" style="' + st + '">↻ Refaire</button>' : '') +
+      (o ? '<button class="chip on" id="a-apply" style="' + st + '">Appliquer</button>' : '') +
+      '<button class="chip' + (nPh ? ' on' : '') + '" id="a-photo" style="' + st + '">📷' + (compact ? '' : ' Photo') + (nPh ? ' (' + nPh + ')' : '') + '</button></div>';
+    const rd = $('#a-redo'); if (rd) rd.onclick = () => { syncDraft(); applyRedo(lp); };
     $('#a-ordo').onclick = () => {
       syncDraft();
       if (!D.patientName.trim()) return toast('Choisis d’abord le patient');
@@ -687,6 +693,17 @@
       toast(o.end && o.end < D.start ? 'Attention : ordonnance terminée le ' + dateCourt(o.end) : 'Soins de l’ordonnance appliqués');
     };
     $('#a-photo').onclick = () => { syncDraft(); nPh ? draftPhotosSheet() : addDraftPhoto(); };
+  }
+  function prevPassage(pid) {
+    const D = UI.draft;
+    return S.soins.filter(x => x.patientId === pid && x.id !== D.id && (x.rec || {}).type === 'once' && (x.acts || []).length && x.start <= D.start)
+      .sort((a, b) => b.start.localeCompare(a.start) || (b.heure || '').localeCompare(a.heure || ''))[0] || null;
+  }
+  function applyRedo(lp) {
+    const D = UI.draft;
+    D.acts = JSON.parse(JSON.stringify(lp.acts)); D.unknown = [];
+    drawAjout();
+    toast('Soins du ' + dateFr(lp.start) + ' repris : ajoute ce qu’il faut');
   }
   function addDraftPhoto() {
     pickImage(async f => {
@@ -867,8 +884,11 @@
   }
   async function saveSoin(fromAbsent) {
     if (UI.saving) return;
-    UI.saving = true; setTimeout(() => { UI.saving = false; }, 1500);
-    if (fromAbsent !== true) syncDraft();
+    UI.saving = true;
+    try { return await saveSoinInner(fromAbsent); } finally { UI.saving = false; }
+  }
+  async function saveSoinInner(fromAbsent) {
+    if (fromAbsent !== true && fromAbsent !== 'again') syncDraft();
     const D = UI.draft;
     if (!D.acts.length) return toast('Ajoute au moins un acte');
     if (!D.patientName.trim()) return toast('Indique le patient');
@@ -878,6 +898,28 @@
     const lvAct = D.acts.map(a => E.ACTS[a.id] && E.ACTS[a.id].niveau).filter(Boolean).sort().pop();
     if (lvAct && !pat(pid).bsi) pat(pid).bsi = lvAct;
     const data = { patientId: pid, heure: D.heure || nowHM(), acts: D.acts, rec: D.rec, start: D.start || today(), end: D.rec.type === 'once' ? '' : (D.end || ''), dimanche: D.dimanche, nuit: false };
+    if (!D.id && D.rec.type === 'once' && !D.forceNew) {
+      const same = S.soins.filter(x => x.patientId === pid && (x.rec || {}).type === 'once' && x.start === data.start && (x.acts || []).length).sort((a, b) => (a.heure || '').localeCompare(b.heure || ''));
+      if (same.length && !D.mergeInto) {
+        return sheet('<h2>Déjà un passage ce jour-là</h2><p class="note">' + esc(pat(pid).nom) + ' a déjà un passage noté le ' + esc(dateFr(data.start)) + '.</p>' +
+          same.map(x => '<button class="btn accent" data-merge="' + x.id + '" style="margin-top:10px;height:auto;padding:10px 14px;flex-direction:column;gap:2px"><span>Ajouter au passage de ' + esc((x.heure || '').replace(':', ' h ')) + '</span><span style="font-size:12px;font-weight:500;opacity:.9">' + esc(actsText(x.acts)) + ' · un seul passage</span></button>').join('') +
+          '<button class="btn ghost" id="dup-new" style="margin-top:10px">Nouveau passage (2e déplacement)</button><button class="btn" data-close style="margin-top:10px">Annuler</button>',
+          (m, close) => {
+            $$('[data-merge]', m).forEach(b => b.onclick = () => { close(); D.mergeInto = b.dataset.merge; saveSoin(fromAbsent === true ? true : 'again'); });
+            $('#dup-new', m).onclick = () => { close(); D.forceNew = true; saveSoin(fromAbsent === true ? true : 'again'); };
+          });
+      }
+      if (D.mergeInto) {
+        const tgt = S.soins.find(x => x.id === D.mergeInto); D.mergeInto = null;
+        if (tgt) {
+          D.acts.forEach(a => { const ex = tgt.acts.find(t => t.id === a.id && a.id !== 'manuel'); if (ex) ex.qty = Math.max(ex.qty, a.qty); else tgt.acts.push(JSON.parse(JSON.stringify(a))); });
+          tgt.photos = (tgt.photos || []).concat(await commitDraftPhotos(pid, data.start));
+          tgt.dimanche = tgt.dimanche || data.dimanche;
+          return afterSave(pid, data.start, 'Ajouté au passage de ' + (tgt.heure || '').replace(':', ' h '));
+        }
+      }
+    }
+    D.forceNew = false;
     data.photos = await commitDraftPhotos(pid, data.start);
     if (D.id) { Object.assign(S.soins.find(s => s.id === D.id), data); save(); toast('Soin modifié'); location.hash = '#patient/' + pid; return; }
     S.soins.push(Object.assign({ id: uid() }, data));
@@ -980,7 +1022,7 @@
             (st.notes.length ? '<div class="s" style="color:var(--ink)">' + esc(st.notes.map(s => actsText(s.acts)).join(' · ')) + '</div>' : '') + trLines(pid, d) + '</a>' + pill + '</div>' +
             '<div style="display:flex;gap:8px;margin-top:8px">' +
             '<a class="chip" style="display:inline-flex;align-items:center;text-decoration:none;min-height:40px;font-size:14px" href="#ajout?patient=' + pid + '&date=' + d + '&back=tournee">+ Soins</a>' +
-            ((() => { const lp = !st.done && !st.absent && lastPassage(pid, d); return lp ? '<button class="chip" data-redo="' + lp.id + '" style="min-height:40px;font-size:14px">↻ Refaire</button>' : ''; })()) +
+            ((() => { const lp = !st.done && !st.absent && lastPassage(pid, d); return lp ? '<a class="chip" style="display:inline-flex;align-items:center;text-decoration:none;min-height:40px;font-size:14px" href="#ajout?patient=' + pid + '&date=' + d + '&back=tournee&redo=1">↻ Refaire</a>' : ''; })()) +
             (st.prevu && !st.done && !st.absent ? '<button class="chip" data-fait="' + pid + '" style="min-height:40px;font-size:14px">Fait</button>' : '') +
             (st.absent ? '<button class="chip" data-unabs="' + pid + '" style="min-height:40px;font-size:14px">Annuler l’absence</button>' : '<button class="chip" data-abs="' + pid + '" style="min-height:40px;font-size:14px">Absent</button>') +
             '</div></div>';
