@@ -35,7 +35,9 @@ Soeuringue est une appli web installable. Tu la mets en ligne une fois (gratuit)
 - **Photos du soin** (📷 sur l'écran du passage) : rattachées au passage. Sur la fiche patient, 📷 montre toutes les photos avec J1, J7… pour suivre la plaie. Elles restent sur le téléphone.
 - **Planning** : le mois en grille. **+ Jours de travail** : choisis le cabinet, puis touche les jours (ou « Une période » : premier jour, puis dernier). **+ Événement** pour le perso, avec rappel la veille au soir par défaut. **Enregistrer et ajouter au calendrier iPhone** ouvre l'ajout dans Calendrier : touche « Ajouter » pour avoir la notification. Touche un jour pour voir son détail. Le cabinet du jour est proposé automatiquement dans la tournée et l'ajout de passage, et apparaît sur l'accueil.
 - **Réglages** : la roue ⚙︎ en haut de l'accueil.
-- **Refaire** : sur la fiche d'un patient, ce bouton recopie un passage au jour choisi (hier, aujourd'hui, demain ou autre date).
+- **Refaire** : dans la tournée (↻ Refaire) ou sur la fiche patient, recopie le dernier passage, avec des cases pour un soin en plus (prise de sang, bilan de plaie, bilan BSI, ablation, autre…). Aujourd'hui par défaut.
+- **Tournée planifiée** : si le Planning indique un cabinet ce jour-là, **Créer la tournée** ouvre directement ses patients, ceux vus récemment en premier, avec **↻ Reprendre la tournée du …**. Le soir, l'accueil propose **Préparer la tournée de demain**. Depuis la tournée, la fiche patient ramène avec **‹ Ma tournée** au même endroit.
+- **Transmissions à donner** : ouvre le cabinet de la semaine, avec en haut les patients **vus cette semaine** et le compteur « vus · faites ».
 - **Nom dans la note** : dans la fiche patient, à remplir seulement si le nom de famille déduit automatiquement ne convient pas.
 - **Répéter** (facultatif) : pour un remplacement long, un soin peut être répété tous les jours, tous les 2 jours ou certains jours.
 - **Patients** : choisis un cabinet pour voir ses patients, avec **+ Nouveau patient** en haut. La recherche de la première page cherche dans tous les cabinets.
@@ -53,7 +55,7 @@ Dans **Réglages**, puis **Sauvegarder** : ça crée un fichier chiffré par un 
 
 ## 7. Mise à jour de l'appli
 
-Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.9.0` devient `v1.9.1`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
+Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.10.0` devient `v1.10.1`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
 
 ---
 Les montants sont des **estimations** calculées selon la NGAP (avenant 11), la brochure Idelstory et le guide CBA. Les tarifs et les règles sont modifiables dans Réglages. Pour un cas particulier, il y a **Ajouter un acte à la main**, puis **Acte manuel**.

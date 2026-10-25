@@ -204,14 +204,15 @@
     const parts = path.split('/');
     const q = Object.fromEntries(new URLSearchParams(query || ''));
     window.scrollTo(0, 0); document.body.classList.remove('noTabs');
+    if (parts[0] !== 'soins') UI.lastRoute = h;
     switch (parts[0]) {
       case 'cabinets': setTab('mois'); return viewCabinets();
       case 'cabinet': setTab('mois'); return viewCabinet(parts[1]);
       case 'planning': setTab('planning'); return viewPlanning();
       case 'patients': setTab('patients'); return viewPatients(parts[1]);
-      case 'patient': setTab('patients'); return viewPatient(parts[1]);
+      case 'patient': setTab(q.from === 'soins' ? 'soins' : 'patients'); return viewPatient(parts[1], q.from);
       case 'ajout': setTab(''); document.body.classList.add('noTabs'); return viewAjout(q);
-      case 'soins': setTab('soins'); return viewSoins();
+      case 'soins': setTab('soins'); if (UI.lastRoute && /^(patient\/|ajout)/.test(UI.lastRoute)) UI.soinsBack = true; UI.lastRoute = h; return viewSoins();
       case 'transmissions': setTab('transmissions'); return viewTransmissions();
       case 'reglages': setTab('mois'); return viewReglages();
       case 'tarifs': setTab('mois'); return viewTarifs();
@@ -249,6 +250,11 @@
       h += '<a class="card rowx" href="' + (wc ? '#soins' : '#planning') + '" id="h-today" style="padding:9px 14px;margin-bottom:10px;text-decoration:none;color:inherit;gap:12px"><span style="width:6px;align-self:stretch;border-radius:3px;background:' + (wc ? cabColor(wc) : '#C9D4DD') + '"></span><span style="flex:1;min-width:0"><span class="note" style="display:block;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px">Aujourd’hui · ' + esc(dateFr(t)) + '</span><b style="display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
         (wc ? esc(wc.nom) + (nT ? ' · ' + nT + ' patient' + (nT > 1 ? 's' : '') : '') : evs.length ? esc(evs.map(e => (e.heure ? e.heure + ' ' : '') + e.titre).join(' · ')) : 'Repos' + (next ? ' · prochain : ' + esc(next.titre) + ' le ' + esc(dateCourt(next.date).slice(0, 5)) : '')) + '</b></span><b style="color:var(--accent);font-size:14px;white-space:nowrap">' + (wc ? 'Tournée ›' : 'Planning ›') + '</b></a>';
     }
+    {
+      const dm = E.addDays(today(), 1); const cm = workCab(dm);
+      if (cm && new Date().getHours() >= 15 && !((S.tournees || {})[dm] || []).length)
+        h += '<button class="card rowx" id="h-tomorrow" style="width:100%;border:0;padding:10px 14px;margin-bottom:10px;gap:12px;cursor:pointer;text-align:left;font:inherit;color:inherit"><span style="width:6px;align-self:stretch;border-radius:3px;background:' + cabColor(cm) + '"></span><span style="flex:1"><b style="display:block;font-size:15px">Préparer la tournée de demain</b><span class="note" style="font-size:13px">' + esc(cm.nom) + '</span></span><b style="color:var(--accent)">›</b></button>';
+    }
     h += '<div class="hero" style="padding:14px 18px;margin-bottom:10px"><div class="lbl">Ce que tu devrais toucher</div><div class="big" style="font-size:34px;margin:0">' + eur0(d.tot.part) + '</div>' +
       '<div class="sub">' + eur(d.tot.facture) + ' facturés par les titulaires · rétrocession déduite</div>' +
       '<div class="row soft"><span>Reçu des titulaires</span><span>' + eur(d.tot.recu) + '</span></div>' +
@@ -264,6 +270,7 @@
     h += '<div class="g2" style="grid-template-columns:1fr 1fr"><button class="btn ghost small" id="h-newcab" style="min-height:46px">+ Nouveau cabinet</button><a class="btn ghost small" href="#detail" style="min-height:46px">Détail du mois</a></div>';
     app.innerHTML = h; bindMonthNav(); bindBanner();
     $('#h-newcab').onclick = () => editCabinet(null);
+    const htm = $('#h-tomorrow'); if (htm) htm.onclick = () => { UI.soinsVue = 'jour'; UI.soinsDate = E.addDays(today(), 1); UI.openTournee = true; location.hash = '#soins'; };
     const ht = $('#h-today'); if (ht) ht.addEventListener('click', () => { UI.soinsVue = 'jour'; UI.soinsDate = today(); });
   }
   function bindBanner() { const b = $('#bn-off'); if (b) b.onclick = () => { localStorage.setItem('soeur_banner_off', '1'); route(); }; }
@@ -484,7 +491,7 @@
     });
     return h + '<div class="line tot"><span>Total facturé</span><span>' + eur(tot) + '</span></div></div>';
   }
-  function viewPatient(id) {
+  function viewPatient(id, from) {
     const p = pat(id); if (!p) { location.hash = '#patients'; return; }
     const c = cab(p.cabinetId);
     const d = monthData(UI.month);
@@ -493,7 +500,7 @@
     const actifs = recs.filter(s => !s.end || s.end >= today()), finis = recs.filter(s => s.end && s.end < today());
     const passes = soins.filter(s => (s.rec || {}).type === 'once').sort((a, b) => b.start.localeCompare(a.start) || (b.heure || '').localeCompare(a.heure || ''));
     const isAbs = s => (S.absences || []).some(a => a.patientId === s.patientId && a.date === s.start);
-    let h = '<div class="top" style="margin-bottom:4px;min-height:40px"><a class="back" href="#patients/' + p.cabinetId + '">‹ ' + esc(c ? c.nom : 'Patients') + '</a><button class="back" id="pt-edit">Modifier</button></div>';
+    let h = '<div class="top" style="margin-bottom:4px;min-height:40px"><a class="back" href="' + (from === 'soins' ? '#soins' : '#patients/' + p.cabinetId) + '">‹ ' + (from === 'soins' ? 'Ma tournée' : esc(c ? c.nom : 'Patients')) + '</a><button class="back" id="pt-edit">Modifier</button></div>';
     h += '<h1 style="font-size:24px;margin:0;line-height:1.2">' + esc(p.nom) + '</h1>';
     const bd = badges(p); if (bd !== 'Patient') h += '<p class="note" style="margin:2px 0 0;font-size:13px">' + bd + '</p>';
     h += trLines(id, today()).replace(/class="tr /g, 'style="margin-top:6px" class="tr ');
@@ -509,7 +516,7 @@
     }
     if (p.noteSoin) h += '<a class="card rowx" href="#ajout?patient=' + id + '&note=1" style="background:#FDF6E8;padding:10px 14px;text-decoration:none;color:inherit;gap:10px"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px">' + esc(p.noteSoin) + '</span><b style="color:var(--accent);font-size:14px;white-space:nowrap">Créer le soin ›</b></a>';
     const nph = patientPhotos(id).length;
-    h += '<div class="g2" style="grid-template-columns:1fr auto auto;margin:2px 0 4px"><a class="btn" href="#ajout?patient=' + id + '" style="min-height:46px">+ Passage</a>' +
+    h += '<div class="g2" style="grid-template-columns:1fr auto auto;margin:2px 0 4px"><a class="btn" href="#ajout?patient=' + id + (from === 'soins' ? '&date=' + UI.soinsDate + '&back=tournee' : '') + '" style="min-height:46px">+ Passage</a>' +
       '<button class="btn ' + (p.ordo ? 'accent' : 'ghost') + ' small" id="pt-ordo" style="min-height:46px;padding:0 12px">📄 Ordo' + (p.ordo ? ' ✓' : '') + '</button>' +
       '<button class="btn ghost small" id="pt-photos" style="min-height:46px;padding:0 12px">📷' + (nph ? ' ' + nph : '') + '</button></div>';
     const passItem = s => '<div class="item" style="padding:6px 8px 6px 14px;min-height:54px"><button class="back" data-pass="' + s.id + '" style="flex:1;min-width:0;text-align:left;color:inherit;display:block;font-weight:400;min-height:42px"><div class="t" style="font-size:15px">' + esc(dateFr(s.start)) + (isAbs(s) ? ' <span class="pill warn" style="font-size:11px">absent</span>' : '') + '</div><div class="s" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">' + esc(actsText(s.acts)) + '</div></button>' +
@@ -550,24 +557,32 @@
     sheet('<h2>Ajouter dans Google Maps ?</h2><p class="note">Google Maps va s’ouvrir sur l’adresse de ' + esc(p.nom) + '. Touche <b>Enregistrer</b>, puis choisis ta liste de patients.</p>' +
       '<div class="btns"><button class="btn ghost" data-close>Plus tard</button><a class="btn accent" id="mp-go" href="' + mapsUrl(p) + '" target="_blank" rel="noopener">Ouvrir Maps</a></div>', (m, close) => { $('#mp-go', m).addEventListener('click', () => setTimeout(close, 300)); });
   }
-  function redoToday(sid) {
+  function redoToday(sid, forDate) {
     const s = S.soins.find(x => x.id === sid);
     const t = today(), demain = E.addDays(t, 1), hier = E.addDays(t, -1);
-    let def = E.addDays(s.start, 1); if (def > demain) def = demain;
+    let def = forDate || E.addDays(s.start, 1); if (!forDate && def > demain) def = demain; if (!forDate && def < t && s.start < t) def = t;
+    const EXTRAS = [['prise_sang', 'Prise de sang'], ['bilan_plaie', 'Bilan de plaie'], ['bsi_renouv', 'Bilan BSI'], ['ablation_fils', 'Ablation fils / agrafes']];
+    const extra = new Set(); const autres = [];
     const chip = (d, l) => '<button class="chip' + (d === def ? ' on' : '') + '" data-d="' + d + '" style="min-height:44px">' + l + '</button>';
-    sheet('<h2>Refaire ce soin</h2><p class="note">' + esc(actsText(s.acts)) + '</p><label class="f">Pour quel jour ?</label>' +
+    sheet('<h2>Refaire le soin</h2><div class="card" style="padding:10px 14px"><div class="note" style="font-size:12px">Mêmes soins que le ' + esc(dateFr(s.start)) + '</div><b>' + esc(actsText(s.acts)) + '</b></div>' +
+      '<label class="f">Un soin en plus ?</label><div class="chips" id="rd-x">' + EXTRAS.map(([k, l]) => '<button class="chip" data-x="' + k + '" style="min-height:40px">+ ' + l + '</button>').join('') + '<button class="chip" id="rd-autre" style="min-height:40px">Autre…</button></div><div id="rd-autres" class="note" style="margin:6px 4px 0"></div>' +
+      '<label class="f">Pour quel jour ?</label>' +
       '<div class="chips" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr))">' + chip(hier, 'Hier') + chip(t, 'Aujourd’hui') + chip(demain, 'Demain') + '</div>' +
-      '<label class="f" for="rd-date">Ou une autre date</label><input class="in" type="date" id="rd-date" value="' + def + '">' +
+      '<input class="in" type="date" id="rd-date" value="' + def + '" style="margin-top:8px" aria-label="Autre date">' +
       '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="rd-ok">Noter le ' + esc(dateFr(def)) + '</button></div>',
       (m, close) => {
         const set = d => { $('#rd-date', m).value = d; $$('[data-d]', m).forEach(b => b.classList.toggle('on', b.dataset.d === d)); $('#rd-ok', m).textContent = 'Noter le ' + dateFr(d); };
         $$('[data-d]', m).forEach(b => b.onclick = () => set(b.dataset.d));
         $('#rd-date', m).onchange = e => e.target.value && set(e.target.value);
+        $$('[data-x]', m).forEach(b => b.onclick = () => { const k = b.dataset.x; extra.has(k) ? extra.delete(k) : extra.add(k); b.classList.toggle('on', extra.has(k)); });
+        $('#rd-autre', m).onclick = () => pickActTo(id => { autres.push(id); $('#rd-autres', m).textContent = 'En plus : ' + autres.map(x => E.ACTS[x].l).join(', '); });
         $('#rd-ok', m).onclick = () => {
           const d = $('#rd-date', m).value || def;
+          const acts = JSON.parse(JSON.stringify(s.acts));
+          [...extra, ...autres].forEach(id => { const ex = acts.find(a => a.id === id); if (ex) ex.qty = Math.min(9, ex.qty + 1); else acts.push({ id, qty: 1 }); });
           const sig = x => JSON.stringify((x.acts || []).map(a => [a.id, a.qty, a.coef || 0]));
-          if (S.soins.some(x => x.patientId === s.patientId && (x.rec || {}).type === 'once' && x.start === d && sig(x) === sig(s))) { toast('Déjà noté le ' + dateFr(d)); return; }
-          S.soins.push({ id: uid(), patientId: s.patientId, heure: s.heure, acts: JSON.parse(JSON.stringify(s.acts)), rec: { type: 'once' }, start: d, end: '', dimanche: E.isDimancheOuFerie(d), nuit: false });
+          if (S.soins.some(x => x.patientId === s.patientId && (x.rec || {}).type === 'once' && x.start === d && sig(x) === sig({ acts }))) { toast('Déjà noté le ' + dateFr(d)); return; }
+          S.soins.push({ id: uid(), patientId: s.patientId, heure: d === t ? nowHM() : s.heure, acts, rec: { type: 'once' }, start: d, end: '', dimanche: E.isDimancheOuFerie(d), nuit: false });
           save(); close(); toast('Noté pour le ' + dateFr(d)); route();
         };
       });
@@ -960,11 +975,12 @@
           const p = pat(pid); if (!p) return;
           const st = statut(pid, d);
           const pill = st.absent ? '<span class="pill warn">❌ absent' + (st.absent.facture ? ' · facturé' : '') + '</span>' : st.done ? '<span class="pill ok">✅ fait</span>' : st.prevu ? '<span class="pill info">prévu</span>' : '<span class="pill" style="background:#EEF1F4;color:var(--muted)">à faire</span>';
-          h += '<div class="item" style="display:block;cursor:default;padding:10px 12px 10px 14px"><div class="rowx" style="align-items:flex-start"><a href="#patient/' + pid + '" style="text-decoration:none;color:inherit;flex:1;min-width:0"><div class="t"><span style="color:var(--accent)">' + (i + 1) + '.</span> ' + esc(p.nom) + '</div>' +
+          h += '<div class="item" style="display:block;cursor:default;padding:10px 12px 10px 14px"><div class="rowx" style="align-items:flex-start"><a href="#patient/' + pid + '?from=soins" style="text-decoration:none;color:inherit;flex:1;min-width:0"><div class="t"><span style="color:var(--accent)">' + (i + 1) + '.</span> ' + esc(p.nom) + '</div>' +
             '<div class="s">' + esc([p.adresse, p.code ? 'code ' + p.code : '', p.etage ? 'ét. ' + p.etage : ''].filter(Boolean).join(' · ')) + '</div>' +
             (st.notes.length ? '<div class="s" style="color:var(--ink)">' + esc(st.notes.map(s => actsText(s.acts)).join(' · ')) + '</div>' : '') + trLines(pid, d) + '</a>' + pill + '</div>' +
             '<div style="display:flex;gap:8px;margin-top:8px">' +
             '<a class="chip" style="display:inline-flex;align-items:center;text-decoration:none;min-height:40px;font-size:14px" href="#ajout?patient=' + pid + '&date=' + d + '&back=tournee">+ Soins</a>' +
+            ((() => { const lp = !st.done && !st.absent && lastPassage(pid, d); return lp ? '<button class="chip" data-redo="' + lp.id + '" style="min-height:40px;font-size:14px">↻ Refaire</button>' : ''; })()) +
             (st.prevu && !st.done && !st.absent ? '<button class="chip" data-fait="' + pid + '" style="min-height:40px;font-size:14px">Fait</button>' : '') +
             (st.absent ? '<button class="chip" data-unabs="' + pid + '" style="min-height:40px;font-size:14px">Annuler l’absence</button>' : '<button class="chip" data-abs="' + pid + '" style="min-height:40px;font-size:14px">Absent</button>') +
             '</div></div>';
@@ -993,9 +1009,14 @@
     $('#s-prev').onclick = () => step(-1); $('#s-next').onclick = () => step(1);
     $('#s-date').onclick = () => { const pk = $('#s-pick'); if (pk.showPicker) { try { pk.showPicker(); return; } catch (e) {} } UI.soinsDate = today(); route(); };
     $('#s-pick').onchange = e => { if (e.target.value) { UI.soinsDate = e.target.value; route(); } };
+    $$('#app a[href^="#patient/"], #app a[href^="#ajout"]').forEach(a => a.addEventListener('click', () => { UI.soinsScroll = window.scrollY; }));
+    if (UI.soinsScroll != null && UI.soinsBack) { const y = UI.soinsScroll; requestAnimationFrame(() => window.scrollTo(0, y)); }
+    UI.soinsBack = false;
     const tc = $('#t-create'); if (tc) tc.onclick = () => editTournee(UI.soinsDate);
+    if (UI.openTournee) { UI.openTournee = false; setTimeout(() => editTournee(UI.soinsDate), 50); }
     const te = $('#t-edit'); if (te) te.onclick = () => editTournee(UI.soinsDate);
     const tb = $('#t-bilan'); if (tb) tb.onclick = () => bilanSheet(UI.soinsDate);
+    $$('#app [data-redo]').forEach(b => b.onclick = () => { UI.soinsScroll = window.scrollY; UI.soinsBack = true; redoToday(b.dataset.redo, UI.soinsDate); });
     $$('[data-fait]').forEach(b => b.onclick = () => { S.faits = (S.faits || []).concat({ patientId: b.dataset.fait, date: UI.soinsDate }); save(); route(); });
     $$('[data-abs]').forEach(b => b.onclick = () => absentSheet(pat(b.dataset.abs).nom, f => { setAbsence(b.dataset.abs, UI.soinsDate, f); toast('Absent noté'); route(); }));
     $$('[data-unabs]').forEach(b => b.onclick = () => { S.absences = S.absences.filter(a => !(a.patientId === b.dataset.unabs && a.date === UI.soinsDate)); save(); route(); });
@@ -1003,14 +1024,21 @@
   function editTournee(date) {
     let ordre = ((S.tournees || {})[date] || []).filter(id => pat(id));
     let q = '';
-    let selCab = S.cabinets.length === 1 ? S.cabinets[0].id : (workCab(date) ? workCab(date).id : null);
+    const planCab = workCab(date);
+    let selCab = S.cabinets.length === 1 ? S.cabinets[0].id : (planCab ? planCab.id : null);
+    const prev = (() => {
+      const ds = Object.keys(S.tournees || {}).filter(d => d < date && (S.tournees[d] || []).some(id => pat(id))).sort().reverse();
+      const pick = ds.find(d => !planCab || S.tournees[d].some(id => (pat(id) || {}).cabinetId === planCab.id));
+      return pick ? { date: pick, ids: S.tournees[pick].filter(id => pat(id)) } : null;
+    })();
     const m = document.createElement('div'); m.className = 'modal';
     m.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" style="max-height:92vh"></div>';
     document.body.appendChild(m);
     const sh = $('.sheet', m);
     const close = () => m.remove();
     const draw = () => {
-      let h = '<h2>Tournée du ' + esc(dateFr(date)) + '</h2><p class="note">Choisis le cabinet, puis touche les patients dans l’ordre où tu vas les voir.</p>';
+      let h = '<h2>Tournée du ' + esc(dateFr(date)) + '</h2><p class="note">' + (planCab ? 'Planning : <b>' + esc(planCab.nom) + '</b>. Touche' : 'Choisis le cabinet, puis touche') + ' les patients dans l’ordre où tu vas les voir.</p>';
+      if (!ordre.length && prev) h += '<button class="btn ghost" id="t-prev" style="margin:6px 0 4px">↻ Reprendre la tournée du ' + esc(dateFr(prev.date)) + ' (' + prev.ids.length + ')</button>';
       h += '<div class="section">Ordre de passage (' + ordre.length + ')</div>';
       h += ordre.length ? '<div class="list">' + ordre.map((id, i) => '<div class="item" style="cursor:default;padding:6px 6px 6px 14px;min-height:48px"><span style="flex:1"><b style="color:var(--accent)">' + (i + 1) + '.</b> ' + esc(pat(id).nom) + '</span><span style="display:flex;gap:4px"><button class="icon-btn" data-up="' + i + '" aria-label="Monter"' + (i ? '' : ' disabled') + '>↑</button><button class="icon-btn" data-down="' + i + '" aria-label="Descendre"' + (i < ordre.length - 1 ? '' : ' disabled') + '>↓</button><button class="icon-btn" data-rm="' + i + '" aria-label="Retirer">✕</button></span></div>').join('') + '</div>' : '<p class="note">Aucun patient pour l’instant.</p>';
       if (!selCab) {
@@ -1020,10 +1048,16 @@
         }).join('') + '</div>';
       } else {
         const cb = cab(selCab);
-        h += '<div class="rowx" style="margin:16px 4px 8px">' + (S.cabinets.length > 1 ? '<button class="back" id="t-cabs" style="min-height:36px">‹ Cabinets</button>' : '<span></span>') + '<b>' + esc(cb.nom) + '</b></div>';
+        h += '<div class="rowx" style="margin:16px 4px 8px">' + (S.cabinets.length > 1 ? '<button class="back" id="t-cabs" style="min-height:36px">' + (planCab && planCab.id === selCab ? 'Autre cabinet' : '‹ Cabinets') + '</button>' : '<span></span>') + '<b>' + esc(cb.nom) + '</b></div>';
         h += '<input class="in" id="tq" placeholder="Rechercher dans ce cabinet" autocomplete="off" value="' + esc(q) + '" style="margin-bottom:8px">';
-        const pts = S.patients.filter(p => p.cabinetId === selCab && !ordre.includes(p.id) && (!q || norm(p.nom).includes(norm(q)) || norm(p.adresse).includes(norm(q)))).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
-        h += pts.length ? '<div class="list">' + pts.map(p => '<button class="item" data-add="' + p.id + '" style="min-height:48px;padding:8px 14px"><span><span class="t" style="font-weight:600">' + esc(p.nom) + '</span>' + (statut(p.id, date).prevu ? ' <span class="pill info" style="font-size:11px">prévu</span>' : '') + '</span><span style="font-size:22px;color:var(--accent)">+</span></button>').join('') + '</div>' : '<p class="note">' + (q ? 'Aucun patient trouvé.' : 'Tous les patients de ce cabinet sont dans la tournée.') + '</p>';
+        const seen = {}; S.patients.forEach(p => { if (p.cabinetId === selCab) seen[p.id] = lastSeen(p.id, date); });
+        const pts = S.patients.filter(p => p.cabinetId === selCab && !ordre.includes(p.id) && (!q || norm(p.nom).includes(norm(q)) || norm(p.adresse).includes(norm(q))))
+          .sort((a, b) => (seen[b.id] || '').localeCompare(seen[a.id] || '') || a.nom.localeCompare(b.nom, 'fr'));
+        const vuLbl = d => { if (!d) return ''; const n = Math.round((E.parseIso(date) - E.parseIso(d)) / 86400000); return n === 1 ? 'vu hier' : n < 7 ? 'vu ' + JOURS_LONG[E.parseIso(d).getDay()] : 'vu le ' + dateCourt(d).slice(0, 5); };
+        const recent = pts.filter(p => seen[p.id] && (E.parseIso(date) - E.parseIso(seen[p.id])) / 86400000 <= 14), autres = pts.filter(p => !recent.includes(p));
+        const row = p => '<button class="item" data-add="' + p.id + '" style="min-height:48px;padding:8px 14px"><span><span class="t" style="font-weight:600">' + esc(p.nom) + '</span>' + (statut(p.id, date).prevu ? ' <span class="pill info" style="font-size:11px">prévu</span>' : '') + (seen[p.id] ? ' <span class="note" style="font-size:12px">· ' + vuLbl(seen[p.id]) + '</span>' : '') + '</span><span style="font-size:22px;color:var(--accent)">+</span></button>';
+        h += pts.length ? (recent.length ? '<div class="note" style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin:6px 4px">Vus récemment</div><div class="list">' + recent.map(row).join('') + '</div>' : '') +
+          (autres.length ? (recent.length ? '<div class="note" style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin:10px 4px 6px">Autres patients</div>' : '') + '<div class="list">' + autres.map(row).join('') + '</div>' : '') : '<p class="note">' + (q ? 'Aucun patient trouvé.' : 'Tous les patients de ce cabinet sont dans la tournée.') + '</p>';
       }
       h += '<div class="btns" style="position:sticky;bottom:0;background:var(--bg);padding-top:8px;margin-bottom:0"><button class="btn ghost" id="t-cancel">Annuler</button><button class="btn accent" id="t-ok">Valider</button></div>';
       sh.innerHTML = h;
@@ -1033,6 +1067,7 @@
       $$('[data-down]', sh).forEach(b => b.onclick = () => { const i = +b.dataset.down; [ordre[i + 1], ordre[i]] = [ordre[i], ordre[i + 1]]; draw(); });
       $$('[data-cab]', sh).forEach(b => b.onclick = () => { selCab = b.dataset.cab; q = ''; draw(); });
       const tc = $('#t-cabs', sh); if (tc) tc.onclick = () => { selCab = null; q = ''; draw(); };
+      const tp = $('#t-prev', sh); if (tp) tp.onclick = () => { ordre = prev.ids.slice(); draw(); toast('Ordre repris : retire ou ajoute des patients'); };
       const tq = $('#tq', sh); if (tq) tq.oninput = () => { q = tq.value; const pos = tq.selectionStart; draw(); const n = $('#tq', sh); n.focus(); n.setSelectionRange(pos, pos); };
       $('#t-cancel', sh).onclick = close;
       $('#t-ok', sh).onclick = () => { S.tournees = S.tournees || {}; if (ordre.length) S.tournees[date] = ordre; else delete S.tournees[date]; save(); close(); route(); };
@@ -1073,6 +1108,19 @@
   function cabCourt(c) { return c ? (c.court || c.nom.replace(/^cabinet\s+(de\s+|du\s+|des\s+)?/i, '')) : ''; }
   function workCab(date) { const id = (S.planning || {})[date]; return id && cab(id) ? cab(id) : null; }
   function dayEvents(date) { return (S.events || []).filter(e => e.date === date).sort((a, b) => (a.heure || '').localeCompare(b.heure || '')); }
+  function lastSeen(pid, before) {
+    let d = '';
+    S.soins.forEach(x => { if (x.patientId === pid && (x.rec || {}).type === 'once' && x.start < before && x.start > d) d = x.start; });
+    Object.entries(S.tournees || {}).forEach(([dt, ids]) => { if (dt < before && dt > d && ids.includes(pid)) d = dt; });
+    return d;
+  }
+  function lastPassage(pid, before) {
+    return S.soins.filter(x => x.patientId === pid && (x.rec || {}).type === 'once' && x.start < before && (x.acts || []).length).sort((a, b) => b.start.localeCompare(a.start) || (b.heure || '').localeCompare(a.heure || ''))[0] || null;
+  }
+  function weekCab(wk) {
+    const n = {}; for (let i = 0; i < 7; i++) { const c = workCab(E.addDays(wk, i)); if (c) n[c.id] = (n[c.id] || 0) + 1; }
+    const best = Object.entries(n).sort((a, b) => b[1] - a[1])[0]; return best ? best[0] : null;
+  }
   function viewPlanning() {
     const ym = UI.planMonth || (UI.planMonth = today().slice(0, 7));
     const [y, mo] = ym.split('-').map(Number);
@@ -1258,6 +1306,7 @@
     if (!UI.trWeek) { const t = today(); UI.trWeek = weekStartOf(E.parseIso(t).getDay() === 1 && UI.trMode === 'recues' ? E.addDays(t, 1) : t); }
     if (S.cabinets.length === 1) UI.trCab = S.cabinets[0].id;
     const wk = UI.trWeek, end = E.addDays(wk, 6);
+    if (UI.trAuto !== wk + UI.trMode) { UI.trAuto = wk + UI.trMode; const wc = weekCab(wk); if (wc) { UI.trCab = wc; UI.trQ = ''; } }
     const MC = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
     const fmt = s => { const d = E.parseIso(s); return JOURS_LONG[d.getDay()].replace(/^./, x => x.toUpperCase()) + ' ' + d.getDate() + ' ' + MC[d.getMonth()]; };
     let h = brandTop('Transmissions');
@@ -1287,12 +1336,22 @@
       const pts = S.patients.filter(p => p.cabinetId === c.id && (!q || norm(p.nom).includes(q) || norm(p.adresse).includes(q)))
         .sort((a, b) => (+!!trGet(wk, UI.trMode, b.id) - +!!trGet(wk, UI.trMode, a.id)) || (+vus.has(b.id) - +vus.has(a.id)) || a.nom.localeCompare(b.nom, 'fr'));
       const cls = UI.trMode === 'recues' ? 'r' : 'g';
-      $('#tr-list').innerHTML = pts.length ? '<div class="list">' + pts.map(p => {
+      const item = p => {
         const t = trGet(wk, UI.trMode, p.id);
         return '<div class="item" style="display:block;padding:10px 12px 10px 14px"><div class="rowx" style="gap:8px"><button class="back" data-tredit="' + p.id + '" style="flex:1;min-width:0;text-align:left;color:inherit;font-weight:700;min-height:40px;display:block">' + esc(p.nom) + (vus.has(p.id) ? ' <span class="pill info" style="font-size:11px;font-weight:700">vu</span>' : '') + '</button>' +
           (t ? '' : '<button class="chip" data-ras="' + p.id + '" style="min-height:40px;font-size:14px;padding:0 10px">RAS ✅</button><button class="chip" data-tredit="' + p.id + '" style="min-height:40px;font-size:14px;padding:0 10px">Info</button>') + '</div>' +
           (t ? '<button class="tr ' + cls + '" data-tredit="' + p.id + '" style="width:100%;text-align:left;border:0;cursor:pointer;font:inherit;font-size:14px">' + esc(trText(t)) + '</button>' : '') + '</div>';
-      }).join('') + '</div>' : '<p class="note">Aucun patient' + (q ? ' trouvé' : '') + '.</p>';
+      };
+      let html;
+      if (UI.trMode === 'donner' && !q) {
+        const vusL = pts.filter(p => vus.has(p.id)), autres = pts.filter(p => !vus.has(p.id));
+        const faites = vusL.filter(p => trGet(wk, 'donner', p.id)).length;
+        html = '<div class="rowx" style="margin:0 4px 6px"><span class="note" style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.5px">Vus cette semaine</span><span class="pill ' + (vusL.length && faites === vusL.length ? 'ok' : 'info') + '">' + vusL.length + ' vu' + (vusL.length > 1 ? 's' : '') + ' · ' + faites + ' faite' + (faites > 1 ? 's' : '') + '</span></div>' +
+          (vusL.length ? '<div class="list">' + vusL.map(item).join('') + '</div>' : '<p class="note" style="margin:0 4px 10px">Aucun passage noté cette semaine dans ce cabinet.</p>') +
+          (autres.length ? '<button class="back" id="tr-others" style="margin:4px 4px 8px">' + (UI.trShowOthers ? '▾' : '▸') + ' Autres patients (' + autres.length + ')</button>' + (UI.trShowOthers ? '<div class="list">' + autres.map(item).join('') + '</div>' : '') : '');
+      } else html = pts.length ? '<div class="list">' + pts.map(item).join('') + '</div>' : '<p class="note">Aucun patient' + (q ? ' trouvé' : '') + '.</p>';
+      $('#tr-list').innerHTML = html;
+      const to = $('#tr-others'); if (to) to.onclick = () => { UI.trShowOthers = !UI.trShowOthers; draw(); };
       $$('[data-ras]').forEach(b => b.onclick = () => { trSet(wk, UI.trMode, b.dataset.ras, { ras: true }); draw(); });
       $$('[data-tredit]').forEach(b => b.onclick = () => trEdit(wk, UI.trMode, b.dataset.tredit, draw));
     };
