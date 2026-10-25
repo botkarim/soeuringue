@@ -281,7 +281,8 @@
       case 'patients': setTab('patients'); return viewPatients(parts[1]);
       case 'patient': setTab(q.from === 'soins' ? 'soins' : 'patients'); return viewPatient(parts[1], q.from);
       case 'ajout': setTab(''); document.body.classList.add('noTabs'); return viewAjout(q);
-      case 'soins': setTab('soins'); if (UI.lastRoute && /^(patient\/|ajout)/.test(UI.lastRoute)) UI.soinsBack = true; UI.lastRoute = h; return viewSoins();
+      case 'soins': setTab('soins'); if (UI.lastRoute && /^(patient\/|ajout|soinsdetail)/.test(UI.lastRoute)) UI.soinsBack = true; UI.lastRoute = h; return viewSoins();
+      case 'soinsdetail': setTab('soins'); return viewSoinsDetail();
       case 'transmissions': setTab('transmissions'); return viewTransmissions();
       case 'reglages': setTab('mois'); return viewReglages();
       case 'tarifs': setTab('mois'); return viewTarifs();
@@ -1108,8 +1109,7 @@
     return 'Du ' + dateCourt(days[0]).slice(0, 5) + ' au ' + dateCourt(days[6]).slice(0, 5);
   }
   const MAJ = { IFD: 'Déplacements (IFD)', IFI: 'Déplacements BSI (IFI)', IK: 'Indemnités kilométriques', MCI: 'MCI', MAU: 'MAU', DIM: 'Majoration dimanche / férié', MIE: 'MIE', NUIT: 'Majoration de nuit' };
-  function viewSoins() {
-    const days = periodDays();
+  function soinsTotals(days) {
     const passages = E.coteJours(S, days);
     const retro = pid => { const p = pat(pid); const c = p && cab(p.cabinetId); return ((c && c.retro) || 0) / 100; };
     let fact = 0, part = 0; const actes = {}, majs = {}, forf = {};
@@ -1122,10 +1122,32 @@
         else { const k = l.detail || l.label; (actes[k] = actes[k] || { n: 0, m: 0 }); actes[k].n++; actes[k].m += l.montant; }
       });
     });
+    return { passages, fact, part, actes, majs, forf };
+  }
+  const vueNom = () => UI.soinsVue === 'jour' ? 'du jour' : UI.soinsVue === 'semaine' ? 'de la semaine' : 'du mois';
+  function heroSoins(t, extra) {
+    return '<button class="hero" id="s-hero" style="display:block;width:100%;border:0;text-align:left;font:inherit;color:#fff;cursor:pointer;margin:' + (extra && extra.top ? '0 0 12px' : '14px 0 0') + ';padding:16px 18px" aria-label="Voir le détail">' +
+      '<div class="rowx"><div class="lbl">' + (extra && extra.fini ? '✅ Tournée terminée · ' : '') + 'Ta part ' + vueNom() + '</div><span style="font-size:22px;font-weight:700;opacity:.9">›</span></div>' +
+      '<div class="big" style="font-size:34px">' + eur(t.part) + '</div><div class="sub">' + eur(t.fact) + ' facturés · ' + t.passages.length + ' passage' + (t.passages.length > 1 ? 's' : '') + (extra && extra.prog ? ' · ' + extra.prog : '') + '</div>' +
+      '<div class="sub" style="margin-top:6px;font-weight:700;opacity:1">Voir le détail</div></button>';
+  }
+  function viewSoins() {
+    const days = periodDays();
+    const T = soinsTotals(days); const passages = T.passages;
+    let fini = false, prog = '';
+    if (UI.soinsVue === 'jour') {
+      const ordre = ((S.tournees || {})[UI.soinsDate] || []).filter(id => pat(id));
+      if (ordre.length) {
+        const ok = ordre.filter(pid => { const st = statut(pid, UI.soinsDate); return st.done || st.absent; }).length;
+        fini = ok === ordre.length; prog = ok + ' / ' + ordre.length + ' patient' + (ordre.length > 1 ? 's' : '') + ' fait' + (ok > 1 ? 's' : '');
+      }
+    }
+    const heroTop = UI.soinsVue !== 'jour' || fini;
     let h = brandTop('Mes soins');
     h += '<div class="chips noprint" style="margin-bottom:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))">' + [['jour', 'Jour'], ['semaine', 'Semaine'], ['mois', 'Mois']].map(([k, l]) => '<button class="chip' + (UI.soinsVue === k ? ' on' : '') + '" data-vue="' + k + '" aria-pressed="' + (UI.soinsVue === k) + '">' + l + '</button>').join('') + '</div>';
     h += '<div class="rowx" style="margin-bottom:12px"><button class="icon-btn" id="s-prev" aria-label="Période précédente" style="background:#fff">‹</button><button class="back" id="s-date" style="font-size:17px;color:var(--ink)">' + esc(periodLabel(days)) + '</button><button class="icon-btn" id="s-next" aria-label="Période suivante" style="background:#fff">›</button></div>';
     h += '<input type="date" id="s-pick" value="' + UI.soinsDate + '" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px" tabindex="-1" aria-hidden="true">';
+    if (heroTop) h += heroSoins(T, { top: true, fini });
     // tournée du jour
     if (UI.soinsVue === 'jour') {
       const d = UI.soinsDate; const ordre = (S.tournees || {})[d] || [];
@@ -1150,20 +1172,8 @@
         h += '</div><div class="btns"><button class="btn ghost" id="t-edit">Modifier la tournée</button><button class="btn accent" id="t-bilan">Bilan pour la note</button></div>';
       }
     }
-    // totaux
-    h += '<div class="hero" style="margin-top:14px;padding:16px 18px"><div class="lbl">Ta part ' + (UI.soinsVue === 'jour' ? 'du jour' : UI.soinsVue === 'semaine' ? 'de la semaine' : 'du mois') + '</div><div class="big" style="font-size:34px">' + eur(part) + '</div><div class="sub">' + eur(fact) + ' facturés · ' + passages.length + ' passage' + (passages.length > 1 ? 's' : '') + '</div></div>';
-    // revenu par soin
-    const rows = (obj, cnt) => Object.entries(obj).sort((a, b) => b[1].m - a[1].m).map(([k, v]) => '<div class="line" style="padding:8px 0;border-bottom:1px solid var(--line)"><span>' + esc(k) + ' <span class="note">× ' + cnt(v) + '</span></span><b>' + eur(v.m) + '</b></div>').join('');
-    if (passages.length) {
-      h += '<div class="section">Revenu par soin (facturé)</div><div class="card" style="padding:6px 16px">' + rows(forf, v => v.set.size) + rows(actes, v => v.n) + '</div>';
-      if (Object.keys(majs).length) h += '<div class="section">Déplacements et majorations</div><div class="card" style="padding:6px 16px">' + rows(majs, v => v.n) + '</div>';
-      h += '<div class="section">Passages</div><div class="list">';
-      passages.slice().sort((a, b) => a.date.localeCompare(b.date) || a.heure.localeCompare(b.heure)).forEach(ps => {
-        const p = pat(ps.patientId);
-        h += '<a class="item" href="#patient/' + ps.patientId + '"><div><div class="t">' + (UI.soinsVue !== 'jour' ? esc(dateCourt(ps.date).slice(0, 5)) + ' · ' : '') + esc(p ? p.nom : '?') + (ps.absent ? ' <span class="pill warn" style="font-size:11px">absent</span>' : '') + '</div><div class="s">' + esc(ps.lines.filter(l => l.montant > 0 && !MAJ[l.code]).map(l => l.detail || l.label).join(' · ')) + '</div></div><span class="v">' + eur(ps.total) + '</span></a>';
-      });
-      h += '</div>';
-    } else h += '<p class="note">Aucun soin noté sur cette période.</p>';
+    if (!heroTop) h += heroSoins(T, { prog });
+    if (!passages.length) h += '<p class="note">Aucun soin noté sur cette période.</p>';
     h += '<div class="btns"><a class="btn" href="#ajout?date=' + UI.soinsDate + '">+ Noter un passage</a></div>';
     app.innerHTML = h;
     $$('[data-vue]').forEach(b => b.onclick = () => { UI.soinsVue = b.dataset.vue; route(); });
@@ -1174,6 +1184,7 @@
     $$('#app a[href^="#patient/"], #app a[href^="#ajout"]').forEach(a => a.addEventListener('click', () => { UI.soinsScroll = window.scrollY; }));
     if (UI.soinsScroll != null && UI.soinsBack) { const y = UI.soinsScroll; requestAnimationFrame(() => window.scrollTo(0, y)); }
     UI.soinsBack = false;
+    $('#s-hero').onclick = () => { UI.soinsScroll = window.scrollY; location.hash = '#soinsdetail'; };
     const tc = $('#t-create'); if (tc) tc.onclick = () => editTournee(UI.soinsDate);
     if (UI.openTournee) { UI.openTournee = false; setTimeout(() => editTournee(UI.soinsDate), 50); }
     const te = $('#t-edit'); if (te) te.onclick = () => editTournee(UI.soinsDate);
@@ -1182,6 +1193,25 @@
     $$('[data-fait]').forEach(b => b.onclick = () => { S.faits = (S.faits || []).concat({ patientId: b.dataset.fait, date: UI.soinsDate }); save(); route(); });
     $$('[data-abs]').forEach(b => b.onclick = () => absentSheet(pat(b.dataset.abs).nom, f => { setAbsence(b.dataset.abs, UI.soinsDate, f); toast('Absent noté'); route(); }));
     $$('[data-unabs]').forEach(b => b.onclick = () => { S.absences = S.absences.filter(a => !(a.patientId === b.dataset.unabs && a.date === UI.soinsDate)); save(); route(); });
+  }
+  function viewSoinsDetail() {
+    const days = periodDays(); const T = soinsTotals(days);
+    const back = UI.soinsVue === 'jour' && ((S.tournees || {})[UI.soinsDate] || []).length ? 'Ma tournée' : 'Mes soins';
+    let h = backTop('#soins', back) + '<h1 style="font-size:24px;margin:0 0 4px">Détail ' + vueNom() + '</h1><p class="note" style="margin:0 0 10px">' + esc(periodLabel(days)) + '</p>';
+    h += '<div class="hero" style="padding:16px 18px"><div class="lbl">Ta part ' + vueNom() + '</div><div class="big" style="font-size:34px">' + eur(T.part) + '</div><div class="sub">' + eur(T.fact) + ' facturés · ' + T.passages.length + ' passage' + (T.passages.length > 1 ? 's' : '') + '</div></div>';
+    const rows = (obj, cnt) => Object.entries(obj).sort((a, b) => b[1].m - a[1].m).map(([k, v]) => '<div class="line" style="padding:8px 0;border-bottom:1px solid var(--line)"><span>' + esc(k) + ' <span class="note">× ' + cnt(v) + '</span></span><b>' + eur(v.m) + '</b></div>').join('');
+    if (T.passages.length) {
+      h += '<div class="section">Revenu par soin (facturé)</div><div class="card" style="padding:6px 16px">' + rows(T.forf, v => v.set.size) + rows(T.actes, v => v.n) + '</div>';
+      if (Object.keys(T.majs).length) h += '<div class="section">Déplacements et majorations</div><div class="card" style="padding:6px 16px">' + rows(T.majs, v => v.n) + '</div>';
+      h += '<div class="section">Passages</div><div class="list">';
+      T.passages.slice().sort((a, b) => a.date.localeCompare(b.date) || a.heure.localeCompare(b.heure)).forEach(ps => {
+        const p = pat(ps.patientId);
+        h += '<a class="item" href="#patient/' + ps.patientId + '?from=soins"><div><div class="t">' + (UI.soinsVue !== 'jour' ? esc(dateCourt(ps.date).slice(0, 5)) + ' · ' : '') + esc(p ? p.nom : '?') + (ps.absent ? ' <span class="pill warn" style="font-size:11px">absent</span>' : '') + '</div><div class="s">' + esc(ps.lines.filter(l => l.montant > 0 && !MAJ[l.code]).map(l => l.detail || l.label).join(' · ')) + '</div></div><span class="v">' + eur(ps.total) + '</span></a>';
+      });
+      h += '</div>';
+    } else h += '<p class="note">Aucun soin noté sur cette période.</p>';
+    h += '<a class="btn ghost" href="#soins" style="margin-top:14px">‹ ' + back + '</a>';
+    app.innerHTML = h;
   }
   function editTournee(date) {
     let ordre = ((S.tournees || {})[date] || []).filter(id => pat(id));
