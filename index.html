@@ -49,8 +49,12 @@ a{color:var(--accent)}
 #splash .hello b{display:block;font-size:26px;font-weight:800;letter-spacing:-.3px}
 #splash .hello span{display:block;font-size:19px;font-weight:700;color:#2C6A9A;margin-top:6px}
 #splash .hello i{display:block;font-style:normal;font-size:17px;font-weight:600;color:#3D5A73;margin-top:14px;opacity:0;animation:hello .5s .9s ease forwards}
+#splash .hello small{display:flex;align-items:center;justify-content:center;gap:6px;font-size:14px;font-weight:700;color:#5E7F99;margin-top:8px;opacity:0;animation:hello .5s 1.3s ease forwards}
+#splash .hz{width:20px;height:20px;fill:#E0489A;animation:hz 3s linear infinite,beat 1.2s ease-in-out infinite}
+@keyframes hz{0%{fill:#E0489A}20%{fill:#E8553E}40%{fill:#F2B518}60%{fill:#2FA36B}80%{fill:#3B6FE0}100%{fill:#E0489A}}
+@keyframes beat{0%,100%{transform:scale(1)}50%{transform:scale(1.18)}}
 @keyframes hello{to{opacity:1;transform:none}}
-@media (prefers-reduced-motion:reduce){#splash .hello,#splash .hello i{animation:none;opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){#splash .hello,#splash .hello i,#splash .hello small{animation:none;opacity:1;transform:none}#splash .hz{animation:hz 3s linear infinite}}
 .hero .row.white{background:#fff;color:var(--warn)}
 .hero .row.white.ok{color:var(--ok)}
 .section{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin:18px 4px 8px}

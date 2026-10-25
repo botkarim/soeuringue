@@ -2179,24 +2179,75 @@
 
   // ---------- démarrage ----------
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  (function hello() {
-    const sp = document.getElementById('splash'); const n = (S.prenom || '').trim();
-    if (!sp || !n) return;
+  // ----- écran d'accueil : bonjour + phrase motivante ou verset (une fois sur deux) -----
+  const PHRASES = ['Tu es la meilleure 💙', 'Tu gères comme une cheffe !', 'T’es la boss des IDEL 💪', 'Tes patients ont de la chance de t’avoir.',
+    'Une tournée de plus, une reine de plus 👑', 'Rien ne te résiste aujourd’hui !', 'Sérieuse, douce et efficace : c’est toi.', 'La tournée n’a qu’à bien se tenir 😎',
+    'Seringue en main, sourire aux lèvres ✨', 'Infirmière en or, cœur en or 💛', 'Tu fais un métier qui compte. Fière de toi !',
+    'Ton sourire soigne autant que tes mains 😊', 'Ta bienveillance fait toute la différence.', 'Personne ne pique aussi bien que toi 💉'];
+  const VERSETS = [
+    ['Faites le bien, car Allah aime ceux qui font le bien.', 'Al-Baqara, 2:195'],
+    ['Quiconque sauve une vie, c’est comme s’il avait sauvé l’humanité entière.', 'Al-Mâ’ida, 5:32'],
+    ['Et quand je suis malade, c’est Lui qui me guérit.', 'Ash-Shu’arâ, 26:80'],
+    ['À côté de la difficulté, il y a certes une facilité.', 'Ash-Sharh, 94:5-6'],
+    ['Allah n’impose à aucune âme une charge au-delà de sa capacité.', 'Al-Baqara, 2:286'],
+    ['Ton Seigneur ne t’a ni abandonnée ni délaissée.', 'Ad-Duhâ, 93:3'],
+    ['Ton Seigneur te donnera, et tu seras satisfaite.', 'Ad-Duhâ, 93:5'],
+    ['C’est par le rappel d’Allah que les cœurs s’apaisent.', 'Ar-Ra’d, 13:28'],
+    ['La récompense du bien est-elle autre chose que le bien ?', 'Ar-Rahmân, 55:60'],
+    ['Ceux qui maîtrisent leur colère et pardonnent aux gens : Allah aime ceux qui font le bien.', 'Âl ’Imrân, 3:134'],
+    ['Quiconque fait un bien, fût-ce du poids d’un atome, le verra.', 'Az-Zalzala, 99:7'],
+    ['Entraidez-vous dans la bonté et la piété.', 'Al-Mâ’ida, 5:2'],
+    ['Ne désespérez pas de la miséricorde d’Allah.', 'Az-Zumar, 39:53'],
+    ['Je suis tout proche : je réponds à l’appel de celui qui M’invoque.', 'Al-Baqara, 2:186'],
+    ['Quiconque place sa confiance en Allah, Il lui suffit.', 'At-Talâq, 65:3']];
+  const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+  function pickNew(len, key) { const last = +lsGet(key); let k = Math.floor(Math.random() * len); if (len > 1 && k === last) k = (k + 1 + Math.floor(Math.random() * (len - 1))) % len; lsSet(key, String(k)); return k; }
+  const HEART = '<svg class="hz" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.5-9.3C1.2 8.4 3.3 5 6.6 5c2 0 3.3 1.1 4.1 2.3h2.6C14.1 6.1 15.4 5 17.4 5c3.3 0 5.4 3.4 4.1 6.7C19.5 16.4 12 21 12 21z"/></svg>';
+  // fabrique le message ; renvoie la durée d'affichage
+  function helloHtml() {
+    const n = (S.prenom || '').trim(); if (!n) return null;
     const hr = new Date().getHours();
-    const l1 = (hr >= 18 || hr < 5 ? 'Bonsoir ' : 'Bonjour ') + n + ' !';
-    const PHRASES = ['Tu es la meilleure 💙', 'Tu gères comme une cheffe !', 'T’es la boss des IDEL 💪', 'Tes patients ont de la chance de t’avoir.',
-      'Une tournée de plus, une reine de plus 👑', 'Rien ne te résiste aujourd’hui !', 'Sérieuse, douce et efficace : c’est toi.', 'La tournée n’a qu’à bien se tenir 😎',
-      'Seringue en main, sourire aux lèvres ✨', 'Infirmière en or, cœur en or 💛', 'Tu fais un métier qui compte. Fière de toi !',
-      'Ton sourire soigne autant que tes mains 😊', 'Ta bienveillance fait toute la différence.', 'Personne ne pique aussi bien que toi 💉'];
-    if (norm(n) === 'hagere') PHRASES.push('Ton mari et ta fille t’aiment, ne l’oublie pas ❤️');
-    let last = -1; try { last = +localStorage.getItem('soeur_phrase'); } catch (e) {}
-    let k = Math.floor(Math.random() * PHRASES.length); if (k === last) k = (k + 1 + Math.floor(Math.random() * (PHRASES.length - 1))) % PHRASES.length;
-    try { localStorage.setItem('soeur_phrase', String(k)); } catch (e) {}
-    const d = document.createElement('div'); d.className = 'hello';
-    d.innerHTML = '<b>' + esc(l1) + '</b><span>Bon courage !</span><i>' + esc(PHRASES[k]) + '</i>';
+    let h = '<b>' + esc((hr >= 18 || hr < 5 ? 'Bonsoir ' : 'Bonjour ') + n + ' !') + '</b><span>Bon courage !</span>';
+    const verset = lsGet('soeur_type') !== 'v'; lsSet('soeur_type', verset ? 'v' : 'p');
+    if (verset) {
+      const v = VERSETS[pickNew(VERSETS.length, 'soeur_verset')];
+      h += '<i>« ' + esc(v[0]) + ' »</i><small>' + esc(v[1]) + ' ' + HEART + '</small>';
+      return { html: h, ms: 6000 };
+    }
+    const ph = PHRASES.slice(); if (norm(n) === 'hagere') ph.push('Ton mari et ta fille t’aiment, ne l’oublie pas ❤️');
+    h += '<i>' + esc(ph[pickNew(ph.length, 'soeur_phrase')]) + '</i>';
+    return { html: h, ms: 4000 };
+  }
+  function bindSplashClose(sp) { const out = () => { sp.classList.add('out'); setTimeout(() => sp.remove(), 400); }; sp.addEventListener('click', out); return out; }
+  (function hello() {
+    const sp = document.getElementById('splash'); if (!sp) return;
+    const m = helloHtml(); if (!m) return;
+    const d = document.createElement('div'); d.className = 'hello'; d.innerHTML = m.html;
     sp.appendChild(d); sp.setAttribute('aria-hidden', 'false'); sp.setAttribute('role', 'status');
-    sp.addEventListener('click', () => { sp.classList.add('out'); setTimeout(() => sp.remove(), 400); });
-    window.SOEUR_SPLASH_MS = 4000;
+    bindSplashClose(sp);
+    window.SOEUR_SPLASH_MS = m.ms;
+  })();
+  // Après 15 min sans utiliser l'appli : l'écran d'accueil revient avec un nouveau message (sans rien perdre)
+  (function idle() {
+    const IDLE = 15 * 60 * 1000; let last = Date.now(), hiddenAt = 0;
+    const show = () => {
+      if (document.getElementById('splash')) return;
+      const m = helloHtml(); if (!m) return;
+      const sp = document.createElement('div'); sp.id = 'splash'; sp.setAttribute('role', 'status');
+      sp.innerHTML = '<img src="logo-splash.png" alt=""><div class="hello">' + m.html + '</div>';
+      document.body.appendChild(sp); const out = bindSplashClose(sp); setTimeout(out, m.ms);
+    };
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) hiddenAt = Date.now();
+      else { if (hiddenAt && Date.now() - hiddenAt >= IDLE) { show(); last = Date.now(); } hiddenAt = 0; }
+    });
+    const touch = e => {
+      if (Date.now() - last >= IDLE && !document.hidden) { last = Date.now(); if (!document.getElementById('splash')) { e.preventDefault(); e.stopPropagation(); show(); } return; }
+      last = Date.now();
+    };
+    ['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, touch, true));
+    window.__soeurIdle = { show, setLast: t => { last = t; }, setHidden: t => { hiddenAt = t; } };
   })();
   route();
 })();
