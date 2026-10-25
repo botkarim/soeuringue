@@ -81,13 +81,82 @@
       byPat[p.id] = (byPat[p.id] || 0) + ps.total;
       if (byCab[p.cabinetId]) byCab[p.cabinetId].facture += ps.total;
     });
-    S.virements.filter(v => v.mois === ym).forEach(v => { if (byCab[v.cabinetId]) byCab[v.cabinetId].recu += Number(v.montant) || 0; });
+    const [ma, mb] = monthBounds(ym);
+    S.virements.forEach(v => { if (!byCab[v.cabinetId]) return; const [a, b] = virRange(v); if (b < ma || a > mb) return; byCab[v.cabinetId].recu += virInRange(v, ma, mb); });
     let tot = { facture: 0, part: 0, recu: 0 };
     S.cabinets.forEach(c => {
       const b = byCab[c.id]; b.part = b.facture * (1 - (Number(c.retro) || 0) / 100);
       tot.facture += b.facture; tot.part += b.part; tot.recu += b.recu;
     });
     return { passages, byCab, byPat, tot };
+  }
+  // ----- virements par période -----
+  function rangeDays(a, b) { const out = []; let d = a; while (d <= b && out.length < 400) { out.push(d); d = E.addDays(d, 1); } return out; }
+  function monthBounds(ym) { const ds = E.monthDays(ym); return [ds[0], ds[ds.length - 1]]; }
+  function virRange(v) { if (v.du && v.au) return [v.du, v.au]; return monthBounds(v.mois || String(v.date || today()).slice(0, 7)); }
+  function partByDay(cabId, days) {
+    const c = cab(cabId); const k = 1 - (Number(c && c.retro) || 0) / 100; const m = {};
+    E.coteJours(S, days, { cabinetId: cabId }).forEach(x => { m[x.date] = (m[x.date] || 0) + x.total * k; });
+    return m;
+  }
+  // Répartit le montant sur les jours de la période, au prorata de ce qui a été fait chaque jour
+  function virAlloc(v) {
+    const [a, b] = virRange(v); const days = rangeDays(a, b); const pd = partByDay(v.cabinetId, days);
+    const tot = days.reduce((s, d) => s + (pd[d] || 0), 0); const amt = Number(v.montant) || 0; const out = {};
+    if (tot > 0) days.forEach(d => { if (pd[d]) out[d] = amt * pd[d] / tot; });
+    else days.forEach(d => { out[d] = amt / days.length; });
+    return out;
+  }
+  function virInRange(v, a, b) { const al = virAlloc(v); let s = 0; for (const d in al) if (d >= a && d <= b) s += al[d]; return s; }
+  function isWeek(a, b) { return weekStartOf(a) === a && E.addDays(a, 6) === b; }
+  const MC = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+  const dMois = s => { const d = E.parseIso(s); return JOURS_LONG[d.getDay()] + ' ' + d.getDate() + ' ' + MC[d.getMonth()]; };
+  function virPeriodLabel(v) {
+    if (!(v.du && v.au)) return 'Mois de ' + monthLabel(virRange(v)[0].slice(0, 7));
+    if (isWeek(v.du, v.au)) return 'Semaine du ' + dMois(v.du) + ' au ' + dMois(v.au);
+    return 'Du ' + dateCourt(v.du).slice(0, 5) + ' au ' + dateCourt(v.au);
+  }
+  function virsForMonth(ym, cabId) {
+    const [ma, mb] = monthBounds(ym);
+    return S.virements.filter(v => (!cabId || v.cabinetId === cabId) && cab(v.cabinetId)).filter(v => { const [a, b] = virRange(v); return !(b < ma || a > mb); })
+      .sort((x, y) => virRange(y)[0].localeCompare(virRange(x)[0]));
+  }
+  function virItem(v, ym) {
+    const [ma, mb] = monthBounds(ym); const [a, b] = virRange(v); const c = cab(v.cabinetId);
+    const inM = (a < ma || b > mb) ? virInRange(v, ma, mb) : null;
+    return '<button class="item" data-vir="' + v.id + '"><div style="min-width:0"><div class="t" style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:5px;background:' + cabColor(c) + ';flex:none"></span>' + eur(v.montant) + ' · ' + esc(c.nom) + '</div>' +
+      '<div class="s">' + esc(virPeriodLabel(v)) + (v.date ? ' · reçu le ' + dateCourt(v.date).slice(0, 5) : '') + (inM != null ? ' · dont ' + eur(inM) + ' en ' + MOIS[+ym.slice(5, 7) - 1] : '') + (v.note ? ' · ' + esc(v.note) : '') + '</div></div><span class="s">Modifier</span></button>';
+  }
+  function recusSheet() {
+    const ym = UI.month; const virs = virsForMonth(ym);
+    sheet('<h2>Reçu des titulaires</h2><p class="note" style="text-transform:none">' + monthLabel(ym).replace(/^./, x => x.toUpperCase()) + '</p>' +
+      (virs.length ? '<div class="list">' + virs.map(v => virItem(v, ym)).join('') + '</div>' : '<p class="note">Aucun virement noté pour ce mois.</p>') +
+      '<button class="btn accent" id="rv-add" style="margin-top:10px">+ Noter un virement</button><button class="btn ghost" data-close style="margin-top:8px">Fermer</button>',
+      (m, close) => {
+        $('#rv-add', m).onclick = () => { close(); editVirement(null, null, recusSheet); };
+        $$('[data-vir]', m).forEach(el => el.onclick = () => { const v = S.virements.find(x => x.id === el.dataset.vir); close(); editVirement(v.cabinetId, v.id, recusSheet); });
+      });
+  }
+  function workedOn(d, cabId) {
+    const pc = (S.planning || {})[d]; if (pc && (!cabId || pc === cabId)) return pc;
+    const s = S.soins.find(x => (x.rec || {}).type === 'once' && x.start === d && (!cabId || (pat(x.patientId) || {}).cabinetId === cabId));
+    return s ? (pat(s.patientId) || {}).cabinetId : null;
+  }
+  // Semaine proposée : la plus récente travaillée qui n'a pas encore de virement
+  function defaultVirWeek(cabId) {
+    // on commence par la dernière semaine terminée (la semaine en cours seulement si c'est son dernier jour, ou en dernier recours)
+    const cw = weekStartOf(today()); const fini = E.addDays(cw, 6) === today();
+    let firstWorked = null;
+    const order = []; for (let i = fini ? 0 : 1; i < 12; i++) order.push(E.addDays(cw, -7 * i)); if (!fini) order.push(cw);
+    for (const wk of order) {
+      const days = rangeDays(wk, E.addDays(wk, 6)).filter(d => d <= today());
+      const cabs = {}; days.forEach(d => { const c = workedOn(d, cabId); if (c) cabs[c] = (cabs[c] || 0) + 1; });
+      const c = Object.entries(cabs).sort((x, y) => y[1] - x[1])[0]; if (!c) continue;
+      if (!firstWorked) firstWorked = { wk, cab: c[0] };
+      const paid = S.virements.some(v => v.cabinetId === c[0] && !(virRange(v)[1] < wk || virRange(v)[0] > E.addDays(wk, 6)));
+      if (!paid) return { wk, cab: c[0] };
+    }
+    return firstWorked || { wk: weekStartOf(today()), cab: cabId || null };
   }
   function recText(s) {
     const r = s.rec || { type: 'once' };
@@ -257,7 +326,7 @@
     }
     h += '<div class="hero" style="padding:14px 18px;margin-bottom:10px"><div class="lbl">Ce que tu devrais toucher</div><div class="big" style="font-size:34px;margin:0">' + eur0(d.tot.part) + '</div>' +
       '<div class="sub">' + eur(d.tot.facture) + ' facturés par les titulaires · rétrocession déduite</div>' +
-      '<div class="row soft"><span>Reçu des titulaires</span><span>' + eur(d.tot.recu) + '</span></div>' +
+      '<button class="row soft" id="h-recu" aria-label="Reçu des titulaires : voir et noter les virements"><span>Reçu des titulaires</span><span>' + eur(d.tot.recu) + ' ›</span></button>' +
       (d.tot.recu > 0 || d.tot.part > 0 ? '<div class="row white ' + (ecart >= -0.5 ? 'ok' : '') + '"><span>' + (ecart >= -0.5 ? 'Tout est reçu' : 'Il manque') + '</span><span>' + (ecart >= -0.5 ? '✓' : eur(-ecart)) + '</span></div>' : '') +
       '</div>';
     h += '<div class="section" style="margin:12px 4px 6px">Par cabinet</div>';
@@ -270,6 +339,7 @@
     h += '<div class="g2" style="grid-template-columns:1fr 1fr"><button class="btn ghost small" id="h-newcab" style="min-height:46px">+ Nouveau cabinet</button><a class="btn ghost small" href="#detail" style="min-height:46px">Détail du mois</a></div>';
     app.innerHTML = h; bindMonthNav(); bindBanner();
     $('#h-newcab').onclick = () => editCabinet(null);
+    $('#h-recu').onclick = recusSheet;
     const htm = $('#h-tomorrow'); if (htm) htm.onclick = () => { UI.soinsVue = 'jour'; UI.soinsDate = E.addDays(today(), 1); UI.openTournee = true; location.hash = '#soins'; };
     const ht = $('#h-today'); if (ht) ht.addEventListener('click', () => { UI.soinsVue = 'jour'; UI.soinsDate = today(); });
   }
@@ -336,10 +406,10 @@
     h += monthNav();
     h += '<div class="card grid3"><div>Facturé<b>' + eur(b.facture) + '</b></div><div>Ta part<b>' + eur(b.part) + '</b></div><div>Reçu<b style="color:' + (b.recu + 0.5 < b.part ? 'var(--warn)' : 'var(--ink)') + '">' + eur(b.recu) + '</b></div></div>';
     h += '<button class="btn ghost" id="vir-add">Noter un virement reçu</button>';
-    const virs = S.virements.filter(v => v.cabinetId === id && v.mois === UI.month);
+    const virs = virsForMonth(UI.month, id);
     if (virs.length) {
       h += '<div class="section">Virements pour ' + monthLabel(UI.month) + '</div><div class="list">';
-      virs.forEach(v => h += '<button class="item" data-vir="' + v.id + '"><div><div class="t">' + eur(v.montant) + '</div><div class="s">Reçu le ' + dateCourt(v.date) + (v.note ? ' · ' + esc(v.note) : '') + '</div></div><span class="s">Modifier</span></button>');
+      virs.forEach(v => h += virItem(v, UI.month));
       h += '</div>';
     }
     h += '<div class="btns"><a class="btn" href="#ajout?cabinet=' + id + '">+ Noter un passage</a></div>';
@@ -348,25 +418,75 @@
     $('#vir-add').onclick = () => editVirement(id, null);
     $$('[data-vir]').forEach(el => el.onclick = () => editVirement(id, el.dataset.vir));
   }
-  function editVirement(cabId, vid) {
-    const v = vid ? S.virements.find(x => x.id === vid) : { montant: '', date: today(), mois: UI.month, note: '' };
-    let opts = ''; for (let i = -6; i <= 1; i++) { const ym = shiftMonth(UI.month, i); opts += '<option value="' + ym + '"' + (ym === v.mois ? ' selected' : '') + '>' + monthLabel(ym) + '</option>'; }
-    sheet('<h2>' + (vid ? 'Modifier le virement' : 'Virement reçu') + '</h2><p class="note">' + esc(cab(cabId).nom) + '</p>' +
-      '<label class="f" for="v-m">Montant reçu (€)</label><input class="in" id="v-m" type="number" inputmode="decimal" step="0.01" value="' + esc(v.montant) + '">' +
-      '<label class="f" for="v-mois">Pour le mois de</label><select class="in" id="v-mois">' + opts + '</select>' +
-      '<label class="f" for="v-d">Date de réception</label><input class="in" id="v-d" type="date" value="' + esc(v.date) + '">' +
-      '<label class="f" for="v-n">Note (facultatif)</label><input class="in" id="v-n" value="' + esc(v.note) + '">' +
+  function editVirement(cabId, vid, after) {
+    const old = vid ? S.virements.find(x => x.id === vid) : null;
+    let mode, wk, du, au, cid = cabId;
+    if (old) {
+      [du, au] = virRange(old);
+      if (isWeek(du, au)) { mode = 'sem'; wk = du; } else { mode = 'cal'; wk = weekStartOf(du); }
+    } else {
+      const dw = defaultVirWeek(cabId); mode = 'sem'; wk = dw.wk; if (!cid) cid = dw.cab || (S.cabinets[0] || {}).id;
+      du = wk; au = E.addDays(wk, 6);
+    }
+    if (!cid) return toast('Crée d’abord un cabinet');
+    const cur = weekStartOf(today()); const weeks = [];
+    for (let i = 2; i >= -15; i--) weeks.push(E.addDays(cur, 7 * i));
+    if (!weeks.includes(wk)) weeks.push(wk);
+    weeks.sort().reverse();
+    const cabSel = !cabId && S.cabinets.length > 1;
+    sheet('<h2>' + (old ? 'Modifier le virement' : 'Virement reçu') + '</h2>' +
+      (cabSel ? '<label class="f" for="v-cab">Cabinet</label><select class="in" id="v-cab">' + S.cabinets.map(c => '<option value="' + c.id + '"' + (c.id === cid ? ' selected' : '') + '>' + esc(c.nom) + '</option>').join('') + '</select>'
+        : '<p class="note">' + esc(cab(cid).nom) + '</p>') +
+      '<label class="f" for="v-m">Montant reçu (€)</label><input class="in" id="v-m" type="number" inputmode="decimal" step="0.01" value="' + esc(old ? old.montant : '') + '">' +
+      '<label class="f">Période travaillée</label><div class="chips" style="display:grid;grid-template-columns:1fr 1fr"><button class="chip" data-pm="sem">Semaine</button><button class="chip" data-pm="cal">Calendrier</button></div>' +
+      '<div id="v-sem" style="margin-top:8px"><select class="in" id="v-wk" aria-label="Semaine">' + weeks.map(w => '<option value="' + w + '"' + (w === wk ? ' selected' : '') + '>' + dMois(w) + ' → ' + dMois(E.addDays(w, 6)) + (w === cur ? ' · en cours' : '') + '</option>').join('') + '</select></div>' +
+      '<div id="v-cal" class="g2" style="grid-template-columns:1fr 1fr;margin-top:8px"><div><label class="f" for="v-du" style="margin-top:0">Du</label><input class="in" id="v-du" type="date" value="' + du + '"></div><div><label class="f" for="v-au" style="margin-top:0">Au</label><input class="in" id="v-au" type="date" value="' + au + '"></div></div>' +
+      '<div class="card" id="v-info" style="margin:10px 0 0;padding:10px 14px;font-size:14px"></div>' +
+      '<div class="g2" style="grid-template-columns:1fr 1.3fr"><div><label class="f" for="v-d">Reçu le</label><input class="in" id="v-d" type="date" value="' + esc(old ? old.date || '' : today()) + '"></div><div><label class="f" for="v-n">Note</label><input class="in" id="v-n" placeholder="facultatif" value="' + esc(old ? old.note || '' : '') + '"></div></div>' +
       '<div class="btns"><button class="btn ghost" data-close>Annuler</button><button class="btn accent" id="v-ok">Enregistrer</button></div>' +
-      (vid ? '<button class="btn danger" id="v-del">Supprimer</button>' : ''),
+      (old ? '<button class="btn danger" id="v-del">Supprimer</button>' : ''),
       (m, close) => {
+        const range = () => mode === 'sem' ? [$('#v-wk', m).value, E.addDays($('#v-wk', m).value, 6)] : [$('#v-du', m).value, $('#v-au', m).value];
+        const curCab = () => cabSel ? $('#v-cab', m).value : cid;
+        const info = () => {
+          $$('[data-pm]', m).forEach(b => { b.classList.toggle('on', b.dataset.pm === mode); b.setAttribute('aria-pressed', b.dataset.pm === mode); });
+          $('#v-sem', m).style.display = mode === 'sem' ? '' : 'none';
+          $('#v-cal', m).style.display = mode === 'cal' ? 'grid' : 'none';
+          const [a, b] = range(); const box = $('#v-info', m);
+          if (!a || !b || a > b) { box.innerHTML = '<span class="note">Choisis le premier et le dernier jour.</span>'; return; }
+          const c = curCab(); const days = rangeDays(a, b); const pd = partByDay(c, days);
+          const part = days.reduce((s, d) => s + (pd[d] || 0), 0);
+          const deja = S.virements.filter(o => o.cabinetId === c && (!old || o.id !== old.id)).reduce((s, o) => s + virInRange(o, a, b), 0);
+          const mt = parseFloat(String($('#v-m', m).value).replace(',', '.'));
+          let html = '<div class="rowx"><span>Ta part sur cette période</span><b>' + eur(part) + '</b></div>';
+          if (part === 0) html = '<span class="note">Aucun soin noté sur cette période pour ce cabinet.</span>';
+          if (deja > 0.005) html += '<div class="rowx note" style="margin-top:4px"><span>Déjà reçu sur ces jours</span><span>' + eur(deja) + '</span></div>';
+          if (mt >= 0 && part > 0) {
+            const reste = part - deja - mt;
+            html += '<div style="margin-top:6px;font-weight:700;color:' + (reste > 0.5 ? 'var(--warn)' : 'var(--ok)') + '">' +
+              (reste > 0.5 ? 'Il manque ' + eur(reste) : reste < -0.5 ? '✅ ' + eur(-reste) + ' de plus que prévu' : '✅ C’est bon') + '</div>';
+          }
+          box.innerHTML = html;
+        };
+        $$('[data-pm]', m).forEach(b => b.onclick = () => {
+          if (b.dataset.pm === 'cal' && mode === 'sem') { const [a, z] = range(); $('#v-du', m).value = a; $('#v-au', m).value = z; }
+          mode = b.dataset.pm; info();
+        });
+        ['#v-wk', '#v-du', '#v-au', '#v-cab'].forEach(s => { const el = $(s, m); if (el) el.onchange = info; });
+        $('#v-m', m).oninput = info;
+        info();
         $('#v-ok', m).onclick = () => {
           const montant = parseFloat(String($('#v-m', m).value).replace(',', '.'));
           if (!(montant >= 0)) return toast('Indique le montant reçu');
-          const data = { montant, mois: $('#v-mois', m).value, date: $('#v-d', m).value || today(), note: $('#v-n', m).value.trim() };
-          if (vid) Object.assign(v, data); else S.virements.push(Object.assign({ id: uid(), cabinetId: cabId }, data));
-          save(); close(); route();
+          const [a, b] = range();
+          if (!a || !b || a > b) return toast('Vérifie les dates de la période');
+          if (E.parseIso(b) - E.parseIso(a) > 92 * 86400000) return toast('Période trop longue (3 mois maximum)');
+          const data = { cabinetId: curCab(), montant, du: a, au: b, date: $('#v-d', m).value || today(), note: $('#v-n', m).value.trim() };
+          if (old) { Object.assign(old, data); delete old.mois; } else S.virements.push(Object.assign({ id: uid() }, data));
+          save(); close(); route(); toast('Virement enregistré');
+          if (after) after();
         };
-        const del = $('#v-del', m); if (del) del.onclick = () => { S.virements = S.virements.filter(x => x.id !== vid); save(); close(); route(); };
+        const del = $('#v-del', m); if (del) del.onclick = () => { S.virements = S.virements.filter(x => x.id !== vid); save(); close(); route(); if (after) after(); };
       });
   }
 
@@ -1328,8 +1448,19 @@
       });
   }
 
-  // ----- Transmissions (semaine du mardi au lundi) -----
-  function weekStartOf(date) { const off = (E.parseIso(date).getDay() - 2 + 7) % 7; return E.addDays(date, -off); }
+  // ----- Transmissions (semaine réglable, du mardi au lundi par défaut) -----
+  const wsDay = () => (S.weekStart >= 0 && S.weekStart <= 6 ? +S.weekStart : 2);
+  function weekStartOf(date, ws) { const w = ws == null ? wsDay() : ws; const off = (E.parseIso(date).getDay() - w + 7) % 7; return E.addDays(date, -off); }
+  function setWeekStart(n) {
+    if (n === wsDay()) return;
+    // les transmissions sont rangées par 1er jour de semaine : on les déplace vers la nouvelle semaine qui contient la majorité des jours
+    const tr = S.transmissions || {}; const out = {};
+    Object.keys(tr).forEach(k => {
+      const nk = weekStartOf(E.addDays(k, 3), n); const w = out[nk] = out[nk] || { recues: {}, donner: {} };
+      ['recues', 'donner'].forEach(md => Object.assign(w[md], (tr[k] || {})[md] || {}));
+    });
+    S.transmissions = out; S.weekStart = n; UI.trWeek = null; save();
+  }
   function trGet(week, mode, pid) { const w = (S.transmissions || {})[week]; return w && w[mode] && w[mode][pid]; }
   function trSet(week, mode, pid, val) {
     S.transmissions = S.transmissions || {};
@@ -1345,7 +1476,7 @@
   }
   function viewTransmissions() {
     if (!UI.trMode) UI.trMode = 'recues';
-    if (!UI.trWeek) { const t = today(); UI.trWeek = weekStartOf(E.parseIso(t).getDay() === 1 && UI.trMode === 'recues' ? E.addDays(t, 1) : t); }
+    if (!UI.trWeek) { const t = today(); UI.trWeek = weekStartOf(E.parseIso(t).getDay() === (wsDay() + 6) % 7 && UI.trMode === 'recues' ? E.addDays(t, 1) : t); }
     if (S.cabinets.length === 1) UI.trCab = S.cabinets[0].id;
     const wk = UI.trWeek, end = E.addDays(wk, 6);
     if (UI.trAuto !== wk + UI.trMode) { UI.trAuto = wk + UI.trMode; const wc = weekCab(wk); if (wc) { UI.trCab = wc; UI.trQ = ''; } }
@@ -1417,6 +1548,9 @@
   // ----- Réglages -----
   function viewReglages() {
     let h = backTop('#mois', 'Accueil') + '<h1 style="font-size:24px;margin:0 0 8px">Réglages</h1>';
+    const JL = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+    h += '<div class="g2" style="grid-template-columns:1fr 1.3fr;margin-bottom:12px"><div><label class="f" for="r-prenom" style="margin-top:0">Ton prénom</label><input class="in" id="r-prenom" autocomplete="given-name" autocapitalize="words" placeholder="pour l’accueil" value="' + esc(S.prenom || '') + '"></div>' +
+      '<div><label class="f" for="r-ws" style="margin-top:0">Ma semaine</label><select class="in" id="r-ws">' + [1, 2, 3, 4, 5, 6, 0].map(n => '<option value="' + n + '"' + (n === wsDay() ? ' selected' : '') + '>' + JL[n].replace(/^./, x => x.toUpperCase()) + ' → ' + JL[(n + 6) % 7] + '</option>').join('') + '</select></div></div>';
     h += '<div class="list"><a class="item" href="#cabinets"><div><div class="t">Cabinets et rétrocession</div><div class="s">' + S.cabinets.length + ' cabinet(s)</div></div><span class="s">›</span></a>' +
       '<a class="item" href="#tarifs"><div><div class="t">Tarifs NGAP</div><div class="s">AMI ' + eur(E.amiValue(today(), S.tarifs)) + ' aujourd’hui · avenant 11</div></div><span class="s">›</span></a></div>';
     h += '<div class="section">Règles</div>';
@@ -1434,6 +1568,8 @@
     h += '<button class="btn danger" id="r-wipe" style="margin-top:8px">Tout effacer</button>';
     h += '<p class="note" style="text-align:center;margin-top:18px">Soeuringue · estimation selon la NGAP (avenant 11), brochure Idelstory et guide CBA. Pour les cas tordus, utilise l’acte manuel.</p>';
     app.innerHTML = h;
+    $('#r-prenom').onchange = e => { S.prenom = e.target.value.trim(); save(); toast(S.prenom ? 'À la prochaine ouverture : « Bonjour ' + S.prenom + ' ! »' : 'Message d’accueil retiré'); };
+    $('#r-ws').onchange = e => { setWeekStart(+e.target.value); toast('Semaine : ' + e.target.selectedOptions[0].textContent); };
     $('#r-mau').onchange = e => { S.regles.mauJourBsi = e.target.checked; save(); };
     $('#r-diab').onchange = e => { S.regles.diabBsiPleinDepuis = e.target.value || '2028-01-01'; save(); };
     $('#r-keysave').onclick = () => { S.apiKey = $('#r-key').value.trim(); S.aiModel = $('#r-model').value.trim() || 'claude-haiku-5-5'; save(); toast('Enregistré'); };
@@ -2043,5 +2179,16 @@
 
   // ---------- démarrage ----------
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  (function hello() {
+    const sp = document.getElementById('splash'); const n = (S.prenom || '').trim();
+    if (!sp || !n) return;
+    const hr = new Date().getHours(); const wc = workCab(today());
+    const l1 = (hr >= 18 || hr < 5 ? 'Bonsoir ' : 'Bonjour ') + n + ' !';
+    const l2 = wc ? (hr >= 18 ? 'Bon courage pour la fin de journée' : 'Bon courage pour ta tournée') + ' · ' + wc.nom : (hr >= 18 ? 'Bonne soirée' : 'Bon courage !');
+    const d = document.createElement('div'); d.className = 'hello';
+    d.innerHTML = '<b>' + esc(l1) + '</b><span>' + esc(l2) + '</span>';
+    sp.appendChild(d); sp.setAttribute('aria-hidden', 'false'); sp.setAttribute('role', 'status');
+    window.SOEUR_SPLASH_MS = 1900;
+  })();
   route();
 })();

@@ -42,6 +42,14 @@ a{color:var(--accent)}
 .hero .sub{font-size:13px;opacity:.92}
 .hero .row{margin-top:10px;border-radius:12px;padding:10px 12px;display:flex;justify-content:space-between;font-size:14px;font-weight:700}
 .hero .row.soft{background:rgba(255,255,255,.16)}
+.hero button.row{width:100%;border:0;color:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer;text-align:left;min-height:44px;align-items:center}
+.hero button.row:active{background:rgba(255,255,255,.28)}
+#splash{flex-direction:column;gap:18px}
+#splash .hello{opacity:0;transform:translateY(8px);animation:hello .5s .25s ease forwards;text-align:center;color:#1B3550;padding:0 24px}
+#splash .hello b{display:block;font-size:26px;font-weight:800;letter-spacing:-.3px}
+#splash .hello span{display:block;font-size:17px;font-weight:600;color:#3D5A73;margin-top:4px}
+@keyframes hello{to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){#splash .hello{animation:none;opacity:1;transform:none}}
 .hero .row.white{background:#fff;color:var(--warn)}
 .hero .row.white.ok{color:var(--ok)}
 .section{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin:18px 4px 8px}
@@ -177,6 +185,6 @@ body.noTabs{padding-bottom:calc(80px + env(safe-area-inset-bottom))}
 </nav>
 <script src="engine.js"></script>
 <script src="app.js"></script>
-<script>setTimeout(function(){var s=document.getElementById('splash');if(s){s.classList.add('out');setTimeout(function(){s.remove()},400)}},1000);</script>
+<script>setTimeout(function(){var s=document.getElementById('splash');if(s){s.classList.add('out');setTimeout(function(){s.remove()},400)}},window.SOEUR_SPLASH_MS||1000);</script>
 </body>
 </html>
