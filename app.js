@@ -1537,7 +1537,7 @@
       h += '<input class="in" id="tr-q" placeholder="Rechercher un patient" autocomplete="off" value="' + esc(UI.trQ || '') + '" style="margin-bottom:10px"><div id="tr-list"></div>';
     }
     app.innerHTML = h;
-    $$('[data-mode]').forEach(b => b.onclick = () => { UI.trMode = b.dataset.mode; route(); });
+    $$('[data-mode]').forEach(b => b.onclick = () => { if (UI.trMode !== b.dataset.mode) UI.trWeek = null; UI.trMode = b.dataset.mode; route(); });
     $('#w-prev').onclick = () => { UI.trWeek = E.addDays(UI.trWeek, -7); route(); };
     $('#w-next').onclick = () => { UI.trWeek = E.addDays(UI.trWeek, 7); route(); };
     $$('[data-trcab]').forEach(b => b.onclick = () => { UI.trCab = b.dataset.trcab; UI.trQ = ''; route(); });
@@ -1563,13 +1563,35 @@
           (vusL.length ? '<div class="list">' + vusL.map(item).join('') + '</div>' : '<p class="note" style="margin:0 4px 10px">Aucun passage noté cette semaine dans ce cabinet.</p>') +
           (autres.length ? '<button class="back" id="tr-others" style="margin:4px 4px 8px">' + (UI.trShowOthers ? '▾' : '▸') + ' Autres patients (' + autres.length + ')</button>' + (UI.trShowOthers ? '<div class="list">' + autres.map(item).join('') + '</div>' : '') : '');
       } else html = pts.length ? '<div class="list">' + pts.map(item).join('') + '</div>' : '<p class="note">Aucun patient' + (q ? ' trouvé' : '') + '.</p>';
+      if (UI.trMode === 'donner' && !q) html += '<button class="btn accent" id="tr-send" style="margin-top:12px">📤 Envoyer dans WhatsApp</button>';
       $('#tr-list').innerHTML = html;
+      const ts = $('#tr-send'); if (ts) ts.onclick = () => trSendSheet(wk, c, vus);
       const to = $('#tr-others'); if (to) to.onclick = () => { UI.trShowOthers = !UI.trShowOthers; draw(); };
       $$('[data-ras]').forEach(b => b.onclick = () => { trSet(wk, UI.trMode, b.dataset.ras, { ras: true }); draw(); });
       $$('[data-tredit]').forEach(b => b.onclick = () => trEdit(wk, UI.trMode, b.dataset.tredit, draw));
     };
     $('#tr-q').oninput = e => { UI.trQ = e.target.value; draw(); };
     draw();
+  }
+  function trSendSheet(wk, c, vus) {
+    const all = S.patients.filter(p => p.cabinetId === c.id);
+    const avec = all.filter(p => trGet(wk, 'donner', p.id))
+      .sort((a, b) => (+vus.has(b.id) - +vus.has(a.id)) || a.nom.localeCompare(b.nom, 'fr'));
+    if (!avec.length) return toast('Aucune transmission à donner pour l’instant');
+    const manque = all.filter(p => vus.has(p.id) && !trGet(wk, 'donner', p.id));
+    const titre = (c.nom || '').replace(/^cabinet\s+/i, '');
+    const txt = 'Transmissions ' + titre + '\nSemaine du ' + dMois(wk) + ' au ' + dMois(E.addDays(wk, 6)) + '\n\n' +
+      avec.map(p => nomNote(p) + ' : ' + trText(trGet(wk, 'donner', p.id)).replace(/\s*\n\s*/g, ' · ')).join('\n');
+    sheet('<h2>Envoyer les transmissions</h2>' +
+      (manque.length ? '<div class="card" style="background:#FDF0E4;color:#9A4508;padding:10px 14px;font-size:14px;font-weight:600">⚠️ ' + manque.length + ' patient' + (manque.length > 1 ? 's' : '') + ' vu' + (manque.length > 1 ? 's' : '') + ' sans transmission : ' + esc(manque.map(nomNote).join(', ')) + '</div>' : '') +
+      '<label class="f" for="ts-txt">Message (tu peux le modifier)</label><textarea class="in" id="ts-txt" style="min-height:220px;font-size:15px;line-height:1.4">' + esc(txt) + '</textarea>' +
+      '<div class="btns"><button class="btn ghost" id="ts-copy">Copier</button><button class="btn accent" id="ts-wa">Envoyer dans WhatsApp</button></div>' +
+      (manque.length ? '<button class="btn" data-close>Compléter d’abord</button>' : '<button class="btn" data-close>Fermer</button>'),
+      (m, close) => {
+        const val = () => $('#ts-txt', m).value.trim();
+        $('#ts-copy', m).onclick = async () => { try { await navigator.clipboard.writeText(val()); toast('Copié'); } catch (e) { $('#ts-txt', m).select(); toast('Sélectionné : copie-le à la main'); } };
+        $('#ts-wa', m).onclick = () => { location.href = 'whatsapp://send?text=' + encodeURIComponent(val()); };
+      });
   }
   function trEdit(wk, mode, pid, done) {
     const p = pat(pid); const t = trGet(wk, mode, pid);
