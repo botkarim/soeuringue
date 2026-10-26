@@ -1475,15 +1475,21 @@
   }
   function exportIcs(e) {
     const ics = buildIcs(e);
-    const url = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(ics);
-    sheet('<h2>Ajouter au calendrier iPhone</h2><p class="note">Touche le bouton : l’iPhone affiche l’événement, puis touche <b>Ajouter au calendrier</b>. Le rappel est déjà réglé.</p>' +
-      '<a class="btn accent" id="ics-go" href="' + url + '" download="' + esc(e.titre.replace(/[^\wÀ-ÿ -]/g, '').slice(0, 40) || 'evenement') + '.ics" style="margin-top:12px">Ouvrir dans Calendrier</a>' +
-      '<div class="btns"><button class="btn ghost" id="ics-share">Partager</button><button class="btn" data-close>Fermer</button></div>',
+    const nom = (e.titre.replace(/[^\wÀ-ÿ -]/g, '').slice(0, 40).trim() || 'evenement') + '.ics';
+    // vrai lien (servi par le moteur hors ligne de l'appli) si possible, sinon lien fabriqué dans la page
+    const viaSw = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+    const url = viaSw ? 'cal.ics?d=' + encodeURIComponent(ics) : 'data:text/calendar;charset=utf-8,' + encodeURIComponent(ics);
+    sheet('<h2>Ajouter au calendrier iPhone</h2><p class="note">Touche le bouton : l’iPhone affiche l’événement, puis touche <b>Ajouter</b>. Le rappel est déjà réglé.</p>' +
+      '<a class="btn accent" id="ics-go" href="' + url + '"' + (viaSw ? '' : ' download="' + esc(nom) + '"') + ' style="margin-top:12px">📅 Ajouter au calendrier</a>' +
+      '<div class="card" style="margin-top:14px;padding:10px 14px"><b style="font-size:14px">Ça ne marche pas ?</b><p class="note" style="margin:4px 0 8px;font-size:13px">1. Touche <b>Enregistrer dans Fichiers</b> ci-dessous, puis <b>Enregistrer</b>.<br>2. Ouvre l’app <b>Fichiers</b> et touche le fichier « ' + esc(nom) + ' ».<br>3. Touche <b>Ajouter au calendrier</b> (ou « Tout ajouter »).</p>' +
+      '<button class="btn ghost small" id="ics-share" style="width:100%">Enregistrer dans Fichiers</button></div>' +
+      '<button class="btn" data-close style="margin-top:10px">Fermer</button>',
       (m, close) => {
-        $('#ics-go', m).addEventListener('click', () => setTimeout(close, 400));
+        $('#ics-go', m).addEventListener('click', () => setTimeout(close, 600));
         $('#ics-share', m).onclick = async () => {
-          const f = new File([ics], 'evenement.ics', { type: 'text/calendar' });
-          if (navigator.canShare && navigator.canShare({ files: [f] })) { try { await navigator.share({ files: [f] }); close(); } catch (err) {} } else toast('Partage indisponible ici');
+          const f = new File([ics], nom, { type: 'text/calendar' });
+          if (navigator.canShare && navigator.canShare({ files: [f] })) { try { await navigator.share({ files: [f] }); } catch (err) {} }
+          else { const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = nom; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
         };
       });
   }

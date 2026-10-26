@@ -56,7 +56,7 @@ Dans **Réglages**, puis **Sauvegarder** : ça crée un fichier chiffré par un 
 
 ## 7. Mise à jour de l'appli
 
-Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.12.3` devient `v1.12.4`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
+Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.12.4` devient `v1.12.5`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
 
 ---
 Les montants sont des **estimations** calculées selon la NGAP (avenant 11), la brochure Idelstory et le guide CBA. Les tarifs et les règles sont modifiables dans Réglages. Pour un cas particulier, il y a **Ajouter un acte à la main**, puis **Acte manuel**.
