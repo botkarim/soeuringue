@@ -50,13 +50,17 @@ Soeuringue est une appli web installable. Tu la mets en ligne une fois (gratuit)
 
 Dans **Réglages**, puis **Assistant IA**, colle une clé API Anthropic (console.anthropic.com) et appuie sur **Tester**. Le bouton **Demander à l'IA** apparaît alors dans l'ajout de soin. Seul le texte des soins est envoyé, jamais le nom du patient. Le coût est de quelques centimes par mois.
 
-## 6. Sauvegarde
+## 6. To doux list (facultatif)
+
+Soeuringue peut envoyer tes **jours de travail** (date et nom du cabinet, rien d'autre : ni patients, ni soins, ni montants) à To doux list, l'appli de la maison, pour organiser Sophia. Dans **Réglages**, puis **To doux list**, colle le code donné par Karim et appuie sur **Enregistrer**. Ensuite, l'envoi se fait tout seul chaque fois que le planning change, et une fois par jour à l'ouverture. Le bouton **Envoyer maintenant** sert à vérifier. Le code n'est jamais mis dans les sauvegardes.
+
+## 7. Sauvegarde
 
 Dans **Réglages**, puis **Sauvegarder** : ça crée un fichier chiffré par un mot de passe, avec ou sans les photos (case à cocher) (à ranger dans Fichiers ou iCloud Drive). Pour récupérer les données sur un nouveau téléphone : **Restaurer**. Pense à le faire régulièrement.
 
-## 7. Mise à jour de l'appli
+## 8. Mise à jour de l'appli
 
-Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.12.4` devient `v1.12.5`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
+Sur GitHub, dans le dépôt : **Add file**, puis **Upload files**, glisse les nouveaux fichiers (ils remplacent les anciens), puis **Commit changes**. Sur l'iPhone, ouvre Soeuringue avec du réseau, ferme-la complètement, puis rouvre-la : la nouvelle version s'affiche. Dans `sw.js`, change le numéro de version (`soeuringue-v1.13.0` devient `v1.13.1`, etc.). L'appli se mettra à jour toute seule à la prochaine ouverture avec du réseau. Les données ne sont pas touchées.
 
 ---
 Les montants sont des **estimations** calculées selon la NGAP (avenant 11), la brochure Idelstory et le guide CBA. Les tarifs et les règles sont modifiables dans Réglages. Pour un cas particulier, il y a **Ajouter un acte à la main**, puis **Acte manuel**.

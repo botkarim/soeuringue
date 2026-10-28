@@ -31,6 +31,43 @@
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast("Impossible d'enregistrer : mémoire pleine ?"); }
+    if (S.tdlCode) planifierEnvoiTdl();
+  }
+
+  // ---------- Envoi du planning à To doux list (l'appli de la maison) ----------
+  // Seuls les jours de travail des 2 prochains mois partent (date + nom du cabinet) : ni patients, ni soins, ni montants.
+  // Le code secret est collé dans Réglages ; il ne quitte jamais ce téléphone autrement et n'est pas dans les sauvegardes.
+  const TDL_URL = 'https://to-doux-list.pages.dev/sync/planning';
+  let tdlMinuteur = null;
+  function planningTdl() {
+    const du = E.iso(new Date()), au = E.addDays(du, 62), travail = {};
+    for (const [d, id] of Object.entries(S.planning || {})) {
+      if (d < du || d > au) continue;
+      const c = S.cabinets.find(x => x.id === id);
+      travail[d] = c ? (c.court || c.nom || 'Cabinet') : 'Cabinet';
+    }
+    return { du, au, travail };
+  }
+  function planifierEnvoiTdl() {
+    const p = planningTdl(), empreinte = JSON.stringify(p);
+    if (empreinte === S.tdlEmpreinte) return;
+    clearTimeout(tdlMinuteur);
+    tdlMinuteur = setTimeout(() => envoyerPlanningTdl(true), 2000);
+  }
+  async function envoyerPlanningTdl(silencieux) {
+    if (!S.tdlCode) { if (!silencieux) toast('Colle d’abord le code To doux list'); return false; }
+    const p = planningTdl();
+    try {
+      const r = await fetch(TDL_URL, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + S.tdlCode }, body: JSON.stringify(p) });
+      if (!r.ok) throw new Error(r.status === 401 ? 'code refusé' : 'erreur ' + r.status);
+      S.tdlEmpreinte = JSON.stringify(p); S.tdlEnvoi = Date.now();
+      try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+      if (!silencieux) toast('Planning envoyé à To doux list ✓');
+      return true;
+    } catch (e) {
+      if (!silencieux) toast('Envoi impossible : ' + (e.message || 'pas de réseau'));
+      return false;
+    }
   }
   if (navigator.storage && navigator.storage.persist) { navigator.storage.persist().catch(() => {}); }
 
@@ -1629,6 +1666,10 @@
       '<label class="f" for="r-key">Clé API Anthropic</label><input class="in" id="r-key" type="password" autocomplete="off" placeholder="sk-ant-…" value="' + esc(S.apiKey) + '">' +
       '<label class="f" for="r-model">Modèle</label><input class="in" id="r-model" value="' + esc(S.aiModel) + '" autocomplete="off" autocapitalize="off">' +
       '<div class="btns"><button class="btn ghost small" id="r-test" style="flex:1">Tester</button><button class="btn accent small" id="r-keysave" style="flex:1">Enregistrer</button></div></div>';
+    h += '<div class="section">To doux list (appli de la maison)</div><div class="card"><p class="note" style="margin-top:0">Envoie tes <b>jours de travail</b> (date et cabinet, rien d’autre) à To doux list, pour organiser Sophia. L’envoi se fait tout seul quand tu changes ton planning.</p>' +
+      '<label class="f" for="r-tdl">Code To doux list</label><input class="in" id="r-tdl" type="password" autocomplete="off" autocapitalize="off" placeholder="colle le code donné par Karim" value="' + esc(S.tdlCode || '') + '">' +
+      '<p class="note" id="r-tdl-st">' + (S.tdlEnvoi ? 'Dernier envoi : ' + new Date(S.tdlEnvoi).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : (S.tdlCode ? 'Pas encore envoyé.' : 'Pas encore relié.')) + '</p>' +
+      '<div class="btns"><button class="btn ghost small" id="r-tdlsave" style="flex:1">Enregistrer</button><button class="btn accent small" id="r-tdlgo" style="flex:1">Envoyer maintenant</button></div></div>';
     h += '<div class="section">Sauvegarde</div><div class="card"><p class="note" style="margin-top:0">Les données restent uniquement sur ce téléphone. Fais une sauvegarde chiffrée régulièrement (par exemple dans Fichiers ou iCloud Drive) pour ne rien perdre si tu changes de téléphone.</p>' +
       '<div class="btns"><button class="btn small" id="r-exp" style="flex:1">Sauvegarder</button><button class="btn ghost small" id="r-imp" style="flex:1">Restaurer</button></div><input type="file" id="r-file" accept=".json,application/json" hidden></div>';
     h += '<div class="section">Importer des patients</div><div class="card"><p class="note" style="margin-top:0">Depuis Google Sheets ou Excel : exporte le tableau en <b>CSV</b>, puis choisis le fichier ici. Tu indiques ensuite quelle colonne correspond à quoi. Le fichier reste sur ce téléphone.</p>' +
@@ -1647,6 +1688,9 @@
       try { const r = await parseAI('pansement d’escarre + insuline + glycémie'); toast('Ça marche : ' + r.acts.map(a => E.actLabel(a)).join(', ')); }
       catch (e) { toast(e.message.slice(0, 90)); }
     };
+    const majTdl = () => { const st = $('#r-tdl-st'); if (st && S.tdlEnvoi) st.textContent = 'Dernier envoi : ' + new Date(S.tdlEnvoi).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+    $('#r-tdlsave').onclick = async () => { S.tdlCode = $('#r-tdl').value.trim(); S.tdlEmpreinte = ''; save(); if (S.tdlCode && await envoyerPlanningTdl(false)) majTdl(); else if (!S.tdlCode) toast('Code retiré'); };
+    $('#r-tdlgo').onclick = async () => { S.tdlCode = $('#r-tdl').value.trim(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} if (await envoyerPlanningTdl(false)) majTdl(); };
     $('#r-exp').onclick = exportBackup;
     $('#r-imp').onclick = () => $('#r-file').click();
     $('#r-file').onchange = e => { const f = e.target.files[0]; if (f) importBackup(f); e.target.value = ''; };
@@ -2213,7 +2257,7 @@
   function exportBackup() {
     askPass('Sauvegarde chiffrée', true, async (pass, withPh) => {
       try {
-        const data = Object.assign({}, S); delete data.apiKey;
+        const data = Object.assign({}, S); delete data.apiKey; delete data.tdlCode; delete data.tdlEmpreinte; delete data.tdlEnvoi;
         if (withPh) { const all = await IDB.all(); data._photos = []; for (const x of all) data._photos.push({ id: x.id, patientId: x.patientId, date: x.date, kind: x.kind, b64: await blobToB64(x.blob) }); }
         const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
         const key = await keyFrom(pass, salt);
@@ -2237,7 +2281,7 @@
         const data = JSON.parse(dec.decode(pt));
         confirmBox('Remplacer les données actuelles par cette sauvegarde ?', 'Remplacer', () => {
           const phs = data._photos; delete data._photos;
-          const k = S.apiKey; S = Object.assign(blank(), data); S.apiKey = k; save();
+          const k = S.apiKey, tc = S.tdlCode; S = Object.assign(blank(), data); S.apiKey = k; S.tdlCode = tc; S.tdlEmpreinte = ''; save();
           if (phs) (async () => { await IDB.clear(); for (const x of phs) { const bin = unb64(x.b64); await IDB.put({ id: x.id, patientId: x.patientId, date: x.date, kind: x.kind, blob: new Blob([bin], { type: 'image/jpeg' }) }); } toast(phs.length + ' photo(s) restaurée(s)'); })();
           toast('Sauvegarde restaurée'); location.hash = '#mois'; route();
         });
@@ -2318,4 +2362,5 @@
     window.__soeurIdle = { show, setLast: t => { last = t; }, setHidden: t => { hiddenAt = t; } };
   })();
   route();
+  if (S.tdlCode && (!S.tdlEnvoi || new Date(S.tdlEnvoi).toDateString() !== new Date().toDateString())) { S.tdlEmpreinte = ''; setTimeout(() => envoyerPlanningTdl(true), 4000); }
 })();
